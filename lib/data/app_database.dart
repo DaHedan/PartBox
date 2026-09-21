@@ -183,10 +183,10 @@ class AppDatabase {
   }
 
   Future<void> _seed(Database db) async {
-    final batch = db.batch();
-
-    // 内置"未分类"大类（id=1，不可删除）
-    batch.insert('categories', {
+    // 内置"未分类"大类（id=1，不可删除）。
+    // 必须最先插入：其余大类依赖自增 id，若延迟到最后批量插入，
+    // 自增行会先占用 id=1 造成主键冲突。
+    await db.insert('categories', {
       'id': kUncategorizedCategoryId,
       'parent_id': null,
       'name': kUncategorizedName,
@@ -218,7 +218,7 @@ class AppDatabase {
     }
 
     // 内置"未分配"仓库（id=1，不可删除）
-    batch.insert('locations', {
+    await db.insert('locations', {
       'id': kUnassignedLocationId,
       'parent_id': null,
       'name': kUnassignedLocationName,
@@ -226,8 +226,6 @@ class AppDatabase {
       'sort': 0,
     });
 
-    batch.insert('settings', {'key': 'schema_seeded', 'value': '1'});
-
-    await batch.commit(noResult: true);
+    await db.insert('settings', {'key': 'schema_seeded', 'value': '1'});
   }
 }
