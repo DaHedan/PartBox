@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 /// 工程风色板（对应《UI 设计规范 v2.0》第 2 节）。
@@ -82,6 +83,20 @@ class AppPalette {
 
 extension PaletteX on BuildContext {
   AppPalette get palette => AppPalette.of(this);
+}
+
+/// 桌面端（Windows）允许用鼠标直接拖动滚动，横向筛选区也能按住拖动。
+class AppScrollBehavior extends MaterialScrollBehavior {
+  const AppScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const {
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+    PointerDeviceKind.stylus,
+    PointerDeviceKind.invertedStylus,
+    PointerDeviceKind.trackpad,
+  };
 }
 
 /// Material 3 主题（深色工程风为默认）。
@@ -236,6 +251,13 @@ class AppTheme {
         shape: RoundedRectangleBorder(borderRadius: radiusField),
       ),
       sliderTheme: SliderThemeData(activeTrackColor: p.primary),
+      scrollbarTheme: ScrollbarThemeData(
+        thumbColor: WidgetStatePropertyAll<Color?>(
+          p.textSub.withValues(alpha: 0.55),
+        ),
+        thickness: const WidgetStatePropertyAll<double>(6),
+        radius: const Radius.circular(3),
+      ),
       extensions: <ThemeExtension<dynamic>>[],
     );
   }

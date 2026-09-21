@@ -23,6 +23,7 @@ const Map<_SortMode, String> _sortLabels = {
   _SortMode.name: '名称',
 };
 
+/// 固定列「类别 / 品牌 / 封装规格」的组 id；参数列 id 为 `param:<参数名>`。
 const String _kCategoryGroup = 'category';
 const String _kBrandGroup = 'brand';
 const String _kPackageGroup = 'package';
@@ -70,7 +71,7 @@ class _CategoryFilterPageState extends State<CategoryFilterPage> {
     return _FilterData(materials, subs);
   }
 
-  /// 某个物料在某个筛选组里的取值集合。
+  /// 某个物料在某个筛选列里的取值集合（与物料详情页参数表同源：params_json）。
   List<String> _valuesOf(MaterialItem item, String groupId) {
     if (groupId == _kCategoryGroup) {
       final id = item.categoryId;
@@ -95,18 +96,120 @@ class _CategoryFilterPageState extends State<CategoryFilterPage> {
     return const [];
   }
 
-  /// 动态参数列（出现频次最高的若干参数键）。
-  List<String> _paramKeys(List<MaterialItem> materials) {
-    final freq = <String, int>{};
-    for (final item in materials) {
+  List<FacetGroup> _buildGroups(
+    _FilterData data,
+    AppState appState,
+    List<MaterialItem> filtered,
+  ) {
+    // 固定三列（最左）：类别 | 品牌 | 封装/规格
+    final groups = <FacetGroup>[
+      _buildCategoryGroup(data, appState),
+      _valueGroup(
+        id: _kBrandGroup,
+        title: '品牌',
+        data: data,
+        appState: appState,
+      ),
+      _valueGroup(
+        id: _kPackageGroup,
+        title: '封装/规格',
+        data: data,
+        appState: appState,
+      ),
+    ];
+
+    // 动态参数列：扫描当前筛选范围内所有物料的 params_json，
+    // 出现过的参数键（容值/耐压/精度/功率…）每个键一列，键名不写死。
+    final frequency = <String, int>{};
+    for (final item in filtered) {
       for (final param in item.params) {
         if (param.v.trim().isEmpty) continue;
-        freq[param.k] = (freq[param.k] ?? 0) + 1;
+        frequency[param.k] = (frequency[param.k] ?? 0) + 1;
       }
     }
-    final keys = freq.entries.where((e) => e.value >= 2).toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    return keys.take(4).map((e) => e.key).toList();
+    final keys = frequency.keys.toList()
+      ..sort((a, b) {
+        final byCount = frequency[b]!.compareTo(frequency[a]!);
+        return byCount != 0 ? byCount : a.compareTo(b);
+      });
+    for (final key in keys) {
+      groups.add(
+        _valueGroup(
+          id: '$_kParamPrefix$key',
+          title: key,
+          data: data,
+          appState: appState,
+        ),
+      );
+    }
+    return groups;
+  }
+
+  /// 固定列「类别」：按子类配置顺序排列，未分类排在最后。
+  FacetGroup _buildCategoryGroup(_FilterData data, AppState appState) {
+    const id = _kCategoryGroup;
+    final counts = _scopeCounts(data, appState, id);
+    final selected = _selection[id] ?? const <String>{};
+
+    final values = <FacetValue>[];
+    for (final sub in data.subcategories) {
+      final key = sub.id.toString();
+      final count = counts[key] ?? 0;
+      if (count == 0 && !selected.contains(key)) continue;
+      values.add(FacetValue(key: key, label: sub.name, count: count));
+    }
+    final noneCount = counts[_kNoneKey] ?? 0;
+    if (noneCount > 0 || selected.contains(_kNoneKey)) {
+      values.add(FacetValue(key: _kNoneKey, label: '未分类', count: noneCount));
+    }
+    for (final entry in counts.entries) {
+      if (values.any((v) => v.key == entry.key)) continue;
+      values.add(
+        FacetValue(key: entry.key, label: entry.key, count: entry.value),
+      );
+    }
+    return FacetGroup(id: id, title: '类别', values: values);
+  }
+
+  /// 取值列（品牌 / 封装规格 / 动态参数）：
+  /// 列内条目 = 当前范围内出现过的值去重 + 数量，并按「数值+单位」智能排序。
+  FacetGroup _valueGroup({
+    required String id,
+    required String title,
+    required _FilterData data,
+    required AppState appState,
+  }) {
+    final counts = _scopeCounts(data, appState, id);
+    final selected = _selection[id] ?? const <String>{};
+
+    final values = [
+      for (final entry in counts.entries)
+        FacetValue(key: entry.key, label: entry.key, count: entry.value),
+    ];
+    // 已选但当前范围内已无数据的值仍保留，避免筛选条件在列内"消失"
+    for (final key in selected) {
+      if (!values.any((v) => v.key == key)) {
+        values.add(FacetValue(key: key, label: key, count: 0));
+      }
+    }
+    values.sort((a, b) => compareParamValues(a.label, b.label));
+    return FacetGroup(id: id, title: title, values: values);
+  }
+
+  /// 在"除本列外其余筛选条件"作用下的取值计数。
+  Map<String, int> _scopeCounts(
+    _FilterData data,
+    AppState appState,
+    String groupId,
+  ) {
+    final scope = _applyFilters(data.materials, appState, exceptGroup: groupId);
+    final counts = <String, int>{};
+    for (final item in scope) {
+      for (final value in _valuesOf(item, groupId)) {
+        counts[value] = (counts[value] ?? 0) + 1;
+      }
+    }
+    return counts;
   }
 
   List<MaterialItem> _applyFilters(
@@ -129,70 +232,6 @@ class _CategoryFilterPageState extends State<CategoryFilterPage> {
       }
       return true;
     }).toList();
-  }
-
-  List<FacetGroup> _buildGroups(_FilterData data, AppState appState) {
-    final groups = <FacetGroup>[];
-
-    void addGroup(String id, String title, Map<String, String> labels) {
-      final scope = _applyFilters(data.materials, appState, exceptGroup: id);
-      final counts = <String, int>{};
-      for (final item in scope) {
-        for (final value in _valuesOf(item, id)) {
-          counts[value] = (counts[value] ?? 0) + 1;
-        }
-      }
-      final values = <FacetValue>[];
-      for (final entry in labels.entries) {
-        values.add(
-          FacetValue(
-            key: entry.key,
-            label: entry.value,
-            count: counts[entry.key] ?? 0,
-          ),
-        );
-      }
-      if (values.isEmpty) return;
-      groups.add(FacetGroup(id: id, title: title, values: values));
-    }
-
-    if (data.subcategories.isNotEmpty) {
-      addGroup(_kCategoryGroup, '类别', {
-        for (final sub in data.subcategories) sub.id.toString(): sub.name,
-        _kNoneKey: '未分类',
-      });
-    }
-
-    final brandLabels = <String, String>{};
-    final packageLabels = <String, String>{};
-    for (final item in data.materials) {
-      final brand = item.brand?.trim() ?? '';
-      if (brand.isNotEmpty) brandLabels[brand] = brand;
-      final package = item.package?.trim() ?? '';
-      if (package.isNotEmpty) packageLabels[package] = package;
-    }
-    if (brandLabels.isNotEmpty) {
-      addGroup(_kBrandGroup, '品牌', brandLabels);
-    }
-    if (packageLabels.isNotEmpty) {
-      addGroup(_kPackageGroup, '封装/规格', packageLabels);
-    }
-
-    for (final key in _paramKeys(data.materials)) {
-      final labels = <String, String>{};
-      for (final item in data.materials) {
-        for (final param in item.params) {
-          if (param.k == key && param.v.trim().isNotEmpty) {
-            labels[param.v.trim()] = param.v.trim();
-          }
-        }
-      }
-      if (labels.isNotEmpty) {
-        addGroup('$_kParamPrefix$key', key, labels);
-      }
-    }
-
-    return groups;
   }
 
   void _toggle(String groupId, String key) {
@@ -285,9 +324,10 @@ class _CategoryFilterPageState extends State<CategoryFilterPage> {
           if (data == null) {
             return const Center(child: CircularProgressIndicator());
           }
-          final groups = _buildGroups(data, appState);
+          // 先算出最终结果集，筛选列由它反推（列集合随数据变化）
           final filtered = _applyFilters(data.materials, appState);
           _sortItems(filtered);
+          final groups = _buildGroups(data, appState, filtered);
           final chips = _chips(groups);
 
           return Column(

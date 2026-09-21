@@ -17,6 +17,7 @@ class PartBoxApp extends StatelessWidget {
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       themeMode: appState.themeMode,
+      scrollBehavior: const AppScrollBehavior(),
       home: const HomePage(),
     );
   }

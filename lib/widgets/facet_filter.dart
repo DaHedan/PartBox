@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
@@ -11,7 +12,7 @@ class FacetValue {
   final int count;
 }
 
-/// 一个筛选列（类别 / 品牌 / 封装 / 动态参数）。
+/// 一个筛选列（固定列「类别」或由 params_json 数据驱动的参数列）。
 class FacetGroup {
   const FacetGroup({required this.id, required this.title, required this.values});
 
@@ -29,62 +30,203 @@ class SelectedChip {
   final String label;
 }
 
+/// 参数值排序：能解析为「数值 + 单位」的按数值排（100nF 在 1µF 前），
+/// 解析不了的按字典序排在后面。
+int compareParamValues(String a, String b) {
+  final left = _parseNumberWithUnit(a);
+  final right = _parseNumberWithUnit(b);
+  if (left != null && right != null) {
+    if (left.category == right.category) {
+      final byValue = left.value.compareTo(right.value);
+      if (byValue != 0) return byValue;
+    } else {
+      final byCategory = left.category.compareTo(right.category);
+      if (byCategory != 0) return byCategory;
+    }
+  } else if (left != null) {
+    return -1;
+  } else if (right != null) {
+    return 1;
+  }
+  return a.compareTo(b);
+}
+
+class _NumberWithUnit {
+  const _NumberWithUnit(this.category, this.value);
+
+  /// 量纲（F / H / Ω / V / W / A / Hz / % / ppm）。
+  final String category;
+
+  /// 换算到量纲基准单位后的数值。
+  final double value;
+}
+
+/// 单位 →（量纲, 系数）。
+const Map<String, (String, double)> _unitScales = {
+  // 电容
+  'pF': ('F', 1e-12),
+  'nF': ('F', 1e-9),
+  'uF': ('F', 1e-6),
+  'mF': ('F', 1e-3),
+  'F': ('F', 1),
+  // 电感
+  'nH': ('H', 1e-9),
+  'uH': ('H', 1e-6),
+  'mH': ('H', 1e-3),
+  'H': ('H', 1),
+  // 电阻（含 4K7 / 1M 这类简写）
+  'uΩ': ('Ω', 1e-6),
+  'mΩ': ('Ω', 1e-3),
+  'Ω': ('Ω', 1),
+  'R': ('Ω', 1),
+  'kΩ': ('Ω', 1e3),
+  'K': ('Ω', 1e3),
+  'k': ('Ω', 1e3),
+  'MΩ': ('Ω', 1e6),
+  'M': ('Ω', 1e6),
+  'GΩ': ('Ω', 1e9),
+  // 电压 / 功率 / 电流 / 频率
+  'uV': ('V', 1e-6),
+  'mV': ('V', 1e-3),
+  'V': ('V', 1),
+  'kV': ('V', 1e3),
+  'KV': ('V', 1e3),
+  'uW': ('W', 1e-6),
+  'mW': ('W', 1e-3),
+  'W': ('W', 1),
+  'kW': ('W', 1e3),
+  'uA': ('A', 1e-6),
+  'mA': ('A', 1e-3),
+  'A': ('A', 1),
+  'Hz': ('Hz', 1),
+  'kHz': ('Hz', 1e3),
+  'MHz': ('Hz', 1e6),
+  'GHz': ('Hz', 1e9),
+  // 精度与其他
+  '%': ('%', 1),
+  'ppm': ('ppm', 1),
+};
+
+/// 解析 `1uF` / `±10%` / `16V` / `4.7K` 这类「数值 + 单位」；解析失败返回 null。
+_NumberWithUnit? _parseNumberWithUnit(String raw) {
+  final text = raw
+      .trim()
+      .replaceAll('µ', 'u')
+      .replaceAll('μ', 'u')
+      .replaceAll(' ', '');
+  final match = RegExp(
+    r'^[±+\-]?([0-9]+(?:\.[0-9]+)?)([A-Za-zΩ%]*)$',
+  ).firstMatch(text);
+  if (match == null) return null;
+  final number = double.tryParse(match.group(1)!);
+  if (number == null) return null;
+  final unit = match.group(2) ?? '';
+  if (unit.isEmpty) return _NumberWithUnit('', number);
+  final scale = _unitScales[unit];
+  if (scale == null) return null;
+  return _NumberWithUnit(scale.$1, number * scale.$2);
+}
+
 /// 多列分面筛选器（UI 规范 6.2 / 线框 04）。
 ///
-/// 每列：列标题 + 列内搜索框 + 独立滚动的值列表；列数超出屏幕时横向滚动。
-class FacetFilterBar extends StatelessWidget {
+/// 每列：列标题 + 列内搜索框 + 独立滚动的值列表；
+/// 整排放在一个横向可滚动的 Row 里，列宽固定，列多时左右滑动，
+/// 底部常驻横向滚动条（可拖动），并支持鼠标拖动与滚轮。
+class FacetFilterBar extends StatefulWidget {
   const FacetFilterBar({
     super.key,
     required this.groups,
     required this.selection,
     required this.onToggle,
     this.height = 240,
-    this.columnsPerScreen = 3,
+    this.columnWidth = 200,
   });
 
   final List<FacetGroup> groups;
   final Map<String, Set<String>> selection;
   final void Function(String groupId, String valueKey) onToggle;
   final double height;
-  final int columnsPerScreen;
+
+  /// 单列宽度（≈200dp，列多时左右滑动）。
+  final double columnWidth;
+
+  @override
+  State<FacetFilterBar> createState() => _FacetFilterBarState();
+}
+
+class _FacetFilterBarState extends State<FacetFilterBar> {
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// 滚轮横向滚动：内层纵向值列表先注册者胜（滚轮在列内仍上下滚），
+  /// 未被消费时把增量用于整排左右滚动。
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    final delta = event.scrollDelta.dx.abs() > event.scrollDelta.dy.abs()
+        ? event.scrollDelta.dx
+        : event.scrollDelta.dy;
+    if (delta == 0) return;
+    GestureBinding.instance.pointerSignalResolver.register(event, (_) {
+      if (!_controller.hasClients) return;
+      final position = _controller.position;
+      final target = (position.pixels + delta)
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+      if (target != position.pixels) _controller.jumpTo(target);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
     return SizedBox(
-      height: height,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final columnWidth = constraints.maxWidth / columnsPerScreen;
-          return SingleChildScrollView(
+      height: widget.height,
+      child: Listener(
+        onPointerSignal: _handlePointerSignal,
+        child: Scrollbar(
+          controller: _controller,
+          thumbVisibility: true,
+          interactive: true,
+          scrollbarOrientation: ScrollbarOrientation.bottom,
+          child: SingleChildScrollView(
+            controller: _controller,
             scrollDirection: Axis.horizontal,
+            // 给底部横向滚动条留出位置
+            padding: const EdgeInsets.only(bottom: 8),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                for (var i = 0; i < groups.length; i++)
+                for (var i = 0; i < widget.groups.length; i++)
                   SizedBox(
-                    width: columnWidth,
+                    width: widget.columnWidth,
                     child: Container(
                       decoration: BoxDecoration(
                         border: Border(
                           right: BorderSide(
-                            color: i == groups.length - 1
+                            color: i == widget.groups.length - 1
                                 ? Colors.transparent
                                 : palette.border,
                           ),
                         ),
                       ),
                       child: _FacetColumn(
-                        group: groups[i],
-                        selected: selection[groups[i].id] ?? const {},
-                        onToggle: (key) => onToggle(groups[i].id, key),
+                        group: widget.groups[i],
+                        selected:
+                            widget.selection[widget.groups[i].id] ?? const {},
+                        onToggle: (key) =>
+                            widget.onToggle(widget.groups[i].id, key),
                       ),
                     ),
                   ),
               ],
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
