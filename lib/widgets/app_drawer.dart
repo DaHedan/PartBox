@@ -15,19 +15,16 @@ class RootPage {
 }
 
 /// 切到某个一级页面（替换整个栈，避免层级堆叠）。
-void openRootPage(BuildContext context, int index, {int? currentIndex}) {
-  final navigator = Navigator.of(context);
-  if (currentIndex != null) {
-    Navigator.of(context).pop();
-    if (index == currentIndex) return;
-  }
+///
+/// 只负责换页；关闭抽屉由抽屉项自己处理。
+void openRootPage(BuildContext context, int index) {
   final page = switch (index) {
     RootPage.category => const CategoryPage(),
     RootPage.location => const LocationPage(),
     RootPage.profile => const ProfilePage(),
     _ => const HomePage(),
   };
-  navigator.pushAndRemoveUntil(
+  Navigator.of(context).pushAndRemoveUntil(
     MaterialPageRoute(builder: (_) => page),
     (route) => false,
   );
@@ -54,6 +51,15 @@ class AppDrawer extends StatelessWidget {
   const AppDrawer({super.key, required this.current});
 
   final int current;
+
+  /// 抽屉项点击：先关抽屉，再换页（已在该页则只关抽屉）。
+  void _go(BuildContext context, int index) {
+    if (index == current) {
+      Navigator.of(context).pop();
+      return;
+    }
+    openRootPage(context, index);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -108,31 +114,19 @@ class AppDrawer extends StatelessWidget {
               icon: Icons.home_outlined,
               label: '首页',
               selected: current == RootPage.home,
-              onTap: () => openRootPage(
-                context,
-                RootPage.home,
-                currentIndex: current,
-              ),
+              onTap: () => _go(context, RootPage.home),
             ),
             _Item(
               icon: Icons.grid_view_outlined,
               label: '分类',
               selected: current == RootPage.category,
-              onTap: () => openRootPage(
-                context,
-                RootPage.category,
-                currentIndex: current,
-              ),
+              onTap: () => _go(context, RootPage.category),
             ),
             _Item(
               icon: Icons.warehouse_outlined,
               label: '仓库',
               selected: current == RootPage.location,
-              onTap: () => openRootPage(
-                context,
-                RootPage.location,
-                currentIndex: current,
-              ),
+              onTap: () => _go(context, RootPage.location),
             ),
             const Spacer(),
             Divider(color: palette.border, height: 1),
@@ -140,11 +134,7 @@ class AppDrawer extends StatelessWidget {
               icon: Icons.person_outline,
               label: '我的',
               selected: current == RootPage.profile,
-              onTap: () => openRootPage(
-                context,
-                RootPage.profile,
-                currentIndex: current,
-              ),
+              onTap: () => _go(context, RootPage.profile),
             ),
             const SizedBox(height: 12),
           ],

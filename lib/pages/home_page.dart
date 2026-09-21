@@ -96,11 +96,8 @@ class _HomePageState extends State<HomePage> {
                         ),
                         const Spacer(),
                         TextButton(
-                          onPressed: () => openRootPage(
-                            context,
-                            RootPage.location,
-                            currentIndex: RootPage.home,
-                          ),
+                          onPressed: () =>
+                              openRootPage(context, RootPage.location),
                           child: const Text('全部'),
                         ),
                       ],
