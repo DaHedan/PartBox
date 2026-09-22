@@ -6,14 +6,18 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../data/lcsc/lcsc_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
+import '../utils/scan_payload.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 
 /// P8 扫码页（仅 Android，支持连续扫描）。
 ///
-/// 返回值为扫描到的 C 编号列表。
+/// 返回值为扫描结果列表 [ScanPayload]（C 编号 + 标签带出的 MPN / 数量）。
 class ScanPage extends StatefulWidget {
-  const ScanPage({super.key});
+  const ScanPage({super.key, this.initialContinuous = true});
+
+  /// 连续扫描开关初始状态。入库流程用单次扫描（扫一包立刻带回数量）。
+  final bool initialContinuous;
 
   @override
   State<ScanPage> createState() => _ScanPageState();
@@ -30,8 +34,8 @@ class _ScanPageState extends State<ScanPage> {
     ],
   );
 
-  final List<String> _codes = [];
-  bool _continuous = true;
+  final List<ScanPayload> _hits = [];
+  late bool _continuous = widget.initialContinuous;
   bool _busy = false;
 
   @override
@@ -53,7 +57,17 @@ class _ScanPageState extends State<ScanPage> {
   Future<void> _handleRaw(String raw) async {
     _busy = true;
     try {
-      var code = LcscService.normalizeCode(raw);
+      // 立创袋标二维码：pc → C 编号，pm → MPN，qty → 数量
+      final label = parseLcscLabel(raw);
+      var code = label?.code;
+      if (code == null) {
+        // 批次追溯码（X+数字）：扫错了，提示改扫标签二维码
+        if (isBatchTraceCode(raw)) {
+          if (mounted) showToast(context, '这是批次追溯码，请扫标签上的二维码');
+          return;
+        }
+        code = LcscService.normalizeCode(raw);
+      }
       if (code == null) {
         if (!mounted) return;
         final edited = await showTextDialog(
@@ -66,16 +80,28 @@ class _ScanPageState extends State<ScanPage> {
         code = LcscService.normalizeCode(edited) ?? edited.trim();
       }
       if (code.isEmpty) return;
-      final resolved = code;
+      final hit = ScanPayload(
+        code: code,
+        mpn: label?.mpn,
+        qty: label?.qty,
+        raw: raw,
+      );
 
       if (!_continuous) {
         if (!mounted) return;
-        Navigator.of(context).pop([resolved]);
+        Navigator.of(context).pop([hit]);
         return;
       }
-      if (_codes.contains(resolved)) return;
-      setState(() => _codes.insert(0, resolved));
-      if (mounted) showToast(context, '已记录 $resolved');
+      if (_hits.any((e) => e.code == code)) return;
+      setState(() => _hits.insert(0, hit));
+      if (mounted) {
+        showToast(
+          context,
+          hit.qty == null
+              ? '已记录 $code'
+              : '已记录 $code（${formatQty(hit.qty!)}）',
+        );
+      }
     } finally {
       _busy = false;
     }
@@ -170,7 +196,7 @@ class _ScanPageState extends State<ScanPage> {
                       Row(
                         children: [
                           Text(
-                            '本次扫描 ${_codes.length} 个',
+                            '本次扫描 ${_hits.length} 个',
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
@@ -190,7 +216,7 @@ class _ScanPageState extends State<ScanPage> {
                       const SizedBox(height: 8),
                       SizedBox(
                         height: 40,
-                        child: _codes.isEmpty
+                        child: _hits.isEmpty
                             ? Align(
                                 alignment: Alignment.centerLeft,
                                 child: Text(
@@ -203,25 +229,33 @@ class _ScanPageState extends State<ScanPage> {
                               )
                             : ListView.separated(
                                 scrollDirection: Axis.horizontal,
-                                itemCount: _codes.length,
+                                itemCount: _hits.length,
                                 separatorBuilder: (_, _) =>
                                     const SizedBox(width: 8),
-                                itemBuilder: (context, index) => Center(
-                                  child: Chip(
-                                    label: Text(_codes[index]),
-                                    onDeleted: () => setState(
-                                      () => _codes.removeAt(index),
+                                itemBuilder: (context, index) {
+                                  final hit = _hits[index];
+                                  return Center(
+                                    child: Chip(
+                                      label: Text(
+                                        hit.qty == null
+                                            ? hit.code!
+                                            : '${hit.code!} · ${formatQty(hit.qty!)}',
+                                      ),
+                                      onDeleted: () => setState(
+                                        () => _hits.removeAt(index),
+                                      ),
                                     ),
-                                  ),
-                                ),
+                                  );
+                                },
                               ),
                       ),
                       const SizedBox(height: 8),
                       FilledButton(
-                        onPressed: () =>
-                            Navigator.of(context).pop(List<String>.from(_codes)),
+                        onPressed: () => Navigator.of(
+                          context,
+                        ).pop(List<ScanPayload>.from(_hits)),
                         child: Text(
-                          _codes.isEmpty ? '返回' : '完成（${_codes.length}）',
+                          _hits.isEmpty ? '返回' : '完成（${_hits.length}）',
                         ),
                       ),
                     ],

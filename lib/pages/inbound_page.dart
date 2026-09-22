@@ -12,6 +12,7 @@ import '../data/stock_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
+import '../utils/scan_payload.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/material_card.dart';
 import 'material_detail_page.dart';
@@ -29,11 +30,15 @@ class InboundPage extends StatefulWidget {
 }
 
 class _InboundPageState extends State<InboundPage> {
+  final TextEditingController _qty = TextEditingController();
   final TextEditingController _note = TextEditingController();
 
   late final Future<List<Location>> _locationsFuture = LocationRepository.all();
   final List<MaterialItem> _targets = [];
   int? _locationId;
+
+  /// 本次清单是否由扫码加入（用于确认后自动回到扫码页，扫下一包）。
+  bool _fromScan = false;
 
   @override
   void initState() {
@@ -44,6 +49,7 @@ class _InboundPageState extends State<InboundPage> {
 
   @override
   void dispose() {
+    _qty.dispose();
     _note.dispose();
     super.dispose();
   }
@@ -78,28 +84,33 @@ class _InboundPageState extends State<InboundPage> {
     await context.read<AppState>().setLastLocationId(picked.id!);
   }
 
-  Future<void> _addByCode(String rawCode) async {
+  /// 按 C 编号加入清单（可选：标签带出的 MPN 作为预填）。
+  ///
+  /// 返回是否成功加入清单。
+  Future<bool> _addByCode(String rawCode, {String? presetMpn}) async {
     final code = LcscService.normalizeCode(rawCode) ?? rawCode.trim();
-    if (code.isEmpty) return;
+    if (code.isEmpty) return false;
     final appState = context.read<AppState>();
     final existing = await MaterialRepository.byLcscCode(code);
-    if (!mounted) return;
+    if (!mounted) return false;
     if (existing != null) {
       _addTarget(existing);
       showToast(context, '库中已有 $code，直接加入入库清单');
-      return;
+      return true;
     }
     showToast(context, '正在查询 $code …');
     final result = await LcscService.query(code, apiKey: appState.lcscApiKey);
-    if (!mounted) return;
+    if (!mounted) return false;
     final createdId = await Navigator.of(context).push<int>(
       MaterialPageRoute(
         builder: (_) => MaterialEditPage(
           lcscPart: result.part,
+          presetMpn: presetMpn,
           presetLocationId: _locationId,
           initialDraft: result.part == null
               ? MaterialItem(
                   name: code,
+                  mpn: presetMpn,
                   lcscCode: code,
                   locationId: _locationId,
                   createdAt: DateTime.now(),
@@ -109,23 +120,40 @@ class _InboundPageState extends State<InboundPage> {
         ),
       ),
     );
-    if (createdId == null) return;
+    if (createdId == null) return false;
     final created = await MaterialRepository.byId(createdId);
-    if (!mounted || created == null) return;
+    if (!mounted || created == null) return false;
     _addTarget(created);
     if (result.part == null) {
       showToast(context, '查询失败已转手动录入：${result.error ?? ''}');
     }
+    return true;
   }
 
+  /// 扫码：立创袋标二维码会带出 C 编号 / MPN / 数量。
+  ///
+  /// 采用单次扫描：扫一包立刻带回，数量预填到「入库数量」输入框（可改），
+  /// 确认入库后自动回到本页并再次进入扫码（连续入库，全程零输入）。
   Future<void> _scan() async {
-    final codes = await Navigator.of(context).push<List<String>>(
-      MaterialPageRoute(builder: (_) => const ScanPage()),
+    final hits = await Navigator.of(context).push<List<ScanPayload>>(
+      MaterialPageRoute(
+        builder: (_) => const ScanPage(initialContinuous: false),
+      ),
     );
-    if (codes == null) return;
-    for (final code in codes) {
+    if (hits == null || hits.isEmpty) return;
+    for (final hit in hits) {
       if (!mounted) return;
-      await _addByCode(code);
+      final code = hit.code;
+      if (code == null) continue;
+      final added = await _addByCode(code, presetMpn: hit.mpn);
+      if (!mounted) return;
+      if (!added) continue;
+      _fromScan = true;
+      // qty → 预填入库数量（用户可改，确认时以输入框为准）
+      final qty = hit.qty;
+      if (qty != null) {
+        setState(() => _qty.text = formatQty(qty));
+      }
     }
   }
 
@@ -173,10 +201,13 @@ class _InboundPageState extends State<InboundPage> {
     }
     final locationId = _locationId ?? kUnassignedLocationId;
     final note = _note.text.trim();
+    final qty = double.tryParse(_qty.text.trim()) ?? 0;
+    final fromScan = _fromScan;
     for (final target in _targets) {
-      await StockService.archiveInbound(
+      await StockService.inbound(
         materialId: target.id!,
         locationId: locationId,
+        qty: qty,
         note: note.isEmpty ? null : note,
       );
     }
@@ -187,12 +218,20 @@ class _InboundPageState extends State<InboundPage> {
     context.read<AppState>().notifyDataChanged();
     showToast(
       context,
-      '已入库 ${_targets.length} 种（仓库：$locationName）',
+      qty > 0
+          ? '已入库 ${_targets.length} 种 × ${formatQty(qty)}（$locationName）'
+          : '已入库 ${_targets.length} 种（$locationName）',
     );
     setState(() {
       _targets.clear();
       _note.clear();
+      _qty.clear();
+      _fromScan = false;
     });
+    // 连续入库：扫码进来的，确认后直接回到扫码页，扫下一包
+    if (fromScan && _supportsScanner) {
+      await _scan();
+    }
   }
 
   @override
@@ -346,7 +385,26 @@ class _InboundPageState extends State<InboundPage> {
                         const SizedBox(height: 10),
                       ],
                     const SizedBox(height: 12),
-                    _SectionTitle(title: '3 备注（可选）'),
+                    _SectionTitle(title: '3 入库数量'),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _qty,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: '入库数量',
+                        hintText: '留空 = 只归档，不改数量',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '扫立创包装二维码会自动带入本包数量（可改）；'
+                      '入库时 采购量 +n、余量 +n。',
+                      style: TextStyle(fontSize: 12, color: palette.textSub),
+                    ),
+                    const SizedBox(height: 20),
+                    _SectionTitle(title: '4 备注（可选）'),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _note,
@@ -354,11 +412,6 @@ class _InboundPageState extends State<InboundPage> {
                         labelText: '备注',
                         hintText: '如：到货拆包',
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '入库只把物料归到所选仓库并记一条流水，数量以物料自身的采购量/余量为准。',
-                      style: TextStyle(fontSize: 12, color: palette.textSub),
                     ),
                     const SizedBox(height: 32),
                   ],

@@ -27,20 +27,27 @@ class StockService {
     );
   }
 
-  /// 入库：只做归档——把物料归到所选仓库并记一条入库流水；
-  /// 数量不变（数量以「添加 / 编辑物料」时填写的采购量 / 余量为准）。
-  static Future<void> archiveInbound({
+  /// 入库：把物料归到所选仓库并记一条入库流水。
+  ///
+  /// [qty] > 0 时同时 采购量 +qty、余量 +qty（等式 余量 = 采购量 − 消耗量 仍成立）；
+  /// [qty] 为 0 表示只归档、不改数量。
+  static Future<void> inbound({
     required int materialId,
     required int locationId,
+    double qty = 0,
     String? note,
   }) async {
     await _db.transaction((txn) async {
-      final (_, _, remaining) = await _readQty(txn, materialId);
+      final (purchased, _, remaining) = await _readQty(txn, materialId);
+      final newPurchased = purchased + qty;
+      final newRemaining = remaining + qty;
       final now = DateTime.now().millisecondsSinceEpoch;
       await txn.update(
         'materials',
         {
           'location_id': locationId,
+          if (qty != 0) 'qty_purchased': newPurchased,
+          if (qty != 0) 'qty_remaining': newRemaining,
           'updated_at': now,
           'last_transaction_at': now,
         },
@@ -50,8 +57,8 @@ class StockService {
       await txn.insert('transactions', {
         'material_id': materialId,
         'type': TxType.inbound,
-        'qty': 0,
-        'remaining_after': remaining,
+        'qty': qty,
+        'remaining_after': newRemaining,
         'note': note,
         'created_at': now,
       });

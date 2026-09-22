@@ -18,6 +18,7 @@ import '../data/seed_data.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
+import '../utils/scan_payload.dart';
 import '../widgets/category_icon.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/local_image.dart';
@@ -30,6 +31,7 @@ class MaterialEditPage extends StatefulWidget {
     this.materialId,
     this.initialDraft,
     this.lcscPart,
+    this.presetMpn,
     this.presetLocationId,
   });
 
@@ -41,6 +43,10 @@ class MaterialEditPage extends StatefulWidget {
 
   /// 立创查询结果（新建时自动带出名称 / 参数 / 图片 / 分类）。
   final LcscPart? lcscPart;
+
+  /// 扫码标签带出的 MPN（pm 字段），优先于查询结果里的 MPN。
+  final String? presetMpn;
+
   final int? presetLocationId;
 
   @override
@@ -184,6 +190,11 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
     if (part != null) {
       await _applyPart(part);
     }
+    // 扫码标签带出的 MPN（pm）优先于查询结果
+    final presetMpn = widget.presetMpn;
+    if (presetMpn != null && presetMpn.isNotEmpty) {
+      _mpn.text = presetMpn;
+    }
   }
 
   int? get _topId {
@@ -288,11 +299,20 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
   }
 
   Future<void> _scan() async {
-    final codes = await Navigator.of(context).push<List<String>>(
+    final hits = await Navigator.of(context).push<List<ScanPayload>>(
       MaterialPageRoute(builder: (_) => const ScanPage()),
     );
-    if (codes == null || codes.isEmpty) return;
-    await _queryLcsc(presetCode: codes.first);
+    if (hits == null || hits.isEmpty) return;
+    final hit = hits.first;
+    final code = hit.code;
+    if (code == null) return;
+    await _queryLcsc(presetCode: code);
+    if (!mounted) return;
+    // 标签带出的 MPN 覆盖查询结果
+    final mpn = hit.mpn;
+    if (mpn != null && mpn.isNotEmpty) {
+      setState(() => _mpn.text = mpn);
+    }
   }
 
   Future<void> _pickImage() async {

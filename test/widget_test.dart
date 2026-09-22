@@ -8,6 +8,7 @@ import 'package:partbox/data/repositories/material_repository.dart';
 import 'package:partbox/data/repositories/transaction_repository.dart';
 import 'package:partbox/data/stock_service.dart';
 import 'package:partbox/utils/format.dart';
+import 'package:partbox/utils/scan_payload.dart';
 import 'package:partbox/widgets/facet_filter.dart';
 
 void main() {
@@ -30,6 +31,44 @@ void main() {
     expect(LcscService.normalizeCode('C106248'), 'C106248');
     expect(LcscService.normalizeCode('https://item.szlcsc.com/c106248.html'), 'C106248');
     expect(LcscService.normalizeCode('NO-CODE'), isNull);
+  });
+
+  group('立创袋标二维码解析', () {
+    test('pc → C 编号、pm → MPN、qty → 数量', () {
+      const raw =
+          '{on:SO26091528911,pc:C518789,pm:FDN338P,qty:10,mc:,cc:1,pdi:237147158,hp:11}';
+      final payload = parseLcscLabel(raw);
+      expect(payload, isNotNull);
+      expect(payload!.code, 'C518789');
+      expect(payload.mpn, 'FDN338P');
+      expect(payload.qty, 10);
+    });
+
+    test('容错：缺字段 / 空值跳过，非该格式返回 null', () {
+      final partial = parseLcscLabel('{pc:C106248,pm:,qty:}');
+      expect(partial!.code, 'C106248');
+      expect(partial.mpn, isNull);
+      expect(partial.qty, isNull);
+      // 只有 mpn/qty 也算命中（缺 pc 就不带出 C 编号）
+      final noCode = parseLcscLabel('{pm:FDN338P,qty:100}');
+      expect(noCode!.code, isNull);
+      expect(noCode.mpn, 'FDN338P');
+      // 非花括号格式 / 空对象
+      expect(parseLcscLabel('C106248'), isNull);
+      expect(parseLcscLabel('{}'), isNull);
+    });
+
+    test('qty 带单位也能解析，值为空则不预填', () {
+      expect(parseLcscLabel('{pc:C106248,qty:100PCS}')!.qty, 100);
+      expect(parseLcscLabel('{pc:C106248,qty:0}')!.qty, isNull);
+    });
+
+    test('批次追溯码（X+数字）识别', () {
+      expect(isBatchTraceCode('X237147158'), isTrue);
+      expect(isBatchTraceCode('x123456'), isTrue);
+      expect(isBatchTraceCode('C237147158'), isFalse);
+      expect(isBatchTraceCode('{pc:C518789}'), isFalse);
+    });
   });
 
   test('筛选参数值排序：数值+单位按数值，其余按字典序', () {
