@@ -107,7 +107,12 @@ class StockService {
     }
   }
 
-  /// 手动校正某个数量字段，并生成一条"手动校正"流水。
+  /// 手动校正数量，保持三量自洽：**余量 = 采购量 − 消耗量**。
+  ///
+  /// - 改采购量 / 消耗量 → 由另两个字段算出余量；
+  /// - 改余量 → 保持采购量不变，反推消耗量（消耗量 = 采购量 − 余量）。
+  ///
+  /// 写入后生成一条"手动校正"流水，数量为余量的变化量。
   static Future<void> adjustField({
     required int materialId,
     required String field,
@@ -115,21 +120,27 @@ class StockService {
     String? note,
   }) async {
     await _db.transaction((txn) async {
-      final (purchased, used, remaining) = await _readQty(txn, materialId);
+      final (oldPurchased, oldUsed, oldRemaining) = await _readQty(
+        txn,
+        materialId,
+      );
+
+      var newPurchased = oldPurchased;
+      var newUsed = oldUsed;
       double oldValue;
-      double newPurchased = purchased;
-      double newUsed = used;
-      double newRemaining = remaining;
-      if (field == fieldPurchased) {
-        oldValue = purchased;
-        newPurchased = value;
-      } else if (field == fieldUsed) {
-        oldValue = used;
-        newUsed = value;
-      } else {
-        oldValue = remaining;
-        newRemaining = value;
+      switch (field) {
+        case fieldPurchased:
+          oldValue = oldPurchased;
+          newPurchased = value;
+        case fieldUsed:
+          oldValue = oldUsed;
+          newUsed = value;
+        default:
+          oldValue = oldRemaining;
+          newUsed = oldPurchased - value;
       }
+      final newRemaining = newPurchased - newUsed;
+
       final now = DateTime.now().millisecondsSinceEpoch;
       await txn.update(
         'materials',
@@ -146,9 +157,11 @@ class StockService {
       await txn.insert('transactions', {
         'material_id': materialId,
         'type': TxType.adjust,
-        'qty': value - oldValue,
+        'qty': newRemaining - oldRemaining,
         'remaining_after': newRemaining,
-        'note': note ?? '${fieldLabel(field)} ${_trim(oldValue)} → ${_trim(value)}',
+        'note':
+            note ??
+            '${fieldLabel(field)} ${_trim(oldValue)} → ${_trim(value)}',
         'created_at': now,
       });
     });

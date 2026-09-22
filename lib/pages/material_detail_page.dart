@@ -71,13 +71,16 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
       field: field,
       value: value,
     );
+    final updated = await MaterialRepository.byId(item.id!);
     if (!mounted) return;
     context.read<AppState>().notifyDataChanged();
     _reload();
-    showToast(
-      context,
-      '${StockService.fieldLabel(field)} 已改为 ${formatQty(value)}',
-    );
+    // 三量互相推导：余量 = 采购量 − 消耗量
+    final label = StockService.fieldLabel(field);
+    final derived = field == StockService.fieldRemaining
+        ? '消耗 → ${formatQty(updated?.qtyUsed ?? 0)}'
+        : '余量 → ${formatQty(updated?.qtyRemaining ?? 0)}';
+    showToast(context, '$label → ${formatQty(value)}，$derived');
   }
 
   Future<void> _consume() async {

@@ -83,7 +83,6 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
   String? _imagePath;
   MaterialItem? _existing;
   bool _loading = true;
-  bool _remainingTouched = false;
 
   List<Category> _tops = const [];
   Map<int, List<Category>> _subsByTop = const {};
@@ -177,7 +176,6 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
         _categoryId = existing.categoryId;
         _locationId = existing.locationId ?? kUnassignedLocationId;
         _imagePath = existing.imagePath;
-        _remainingTouched = true;
         _replaceParams(existing.params);
       }
     });
@@ -425,6 +423,19 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
     return trimmed.isEmpty ? null : trimmed;
   }
 
+  static double _num(TextEditingController controller) =>
+      double.tryParse(controller.text.trim()) ?? 0;
+
+  /// 采购量 / 消耗量变动 → 余量 = 采购量 − 消耗量。
+  void _syncRemaining() {
+    _qtyRemaining.text = formatQty(_num(_qtyPurchased) - _num(_qtyUsed));
+  }
+
+  /// 余量变动 → 消耗量 = 采购量 − 余量（采购量保持不变）。
+  void _syncUsed() {
+    _qtyUsed.text = formatQty(_num(_qtyPurchased) - _num(_qtyRemaining));
+  }
+
   /// 替换参数行：旧行的控制器等其输入框卸载（下一帧）后再释放，
   /// 避免输入框仍挂载时被 dispose 导致构建期异常。
   void _replaceParams(Iterable<ParamEntry> params) {
@@ -508,15 +519,17 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
                         child: _numberField(
                           _qtyPurchased,
                           '采购量',
-                          onChanged: (value) {
-                            if (!_remainingTouched) {
-                              _qtyRemaining.text = value;
-                            }
-                          },
+                          onChanged: (_) => _syncRemaining(),
                         ),
                       ),
                       const SizedBox(width: 12),
-                      Expanded(child: _numberField(_qtyUsed, '消耗量')),
+                      Expanded(
+                        child: _numberField(
+                          _qtyUsed,
+                          '消耗量',
+                          onChanged: (_) => _syncRemaining(),
+                        ),
+                      ),
                     ],
                   ),
                   Row(
@@ -525,7 +538,7 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
                         child: _numberField(
                           _qtyRemaining,
                           '余量',
-                          onChanged: (_) => _remainingTouched = true,
+                          onChanged: (_) => _syncUsed(),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -537,6 +550,13 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
                         ),
                       ),
                     ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      '三量联动：余量 = 采购量 − 消耗量，改动任意一项自动推算其余。',
+                      style: TextStyle(fontSize: 12, color: palette.textSub),
+                    ),
                   ),
                   _numberField(_unitPrice, '单价', decimal: true),
                   _field(_note, '备注', maxLines: 2),

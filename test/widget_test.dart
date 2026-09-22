@@ -1,6 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:partbox/data/app_database.dart';
 import 'package:partbox/data/lcsc/lcsc_service.dart';
 import 'package:partbox/data/models.dart';
+import 'package:partbox/data/repositories/material_repository.dart';
+import 'package:partbox/data/repositories/transaction_repository.dart';
+import 'package:partbox/data/stock_service.dart';
 import 'package:partbox/utils/format.dart';
 import 'package:partbox/widgets/facet_filter.dart';
 
@@ -38,5 +44,63 @@ void main() {
     expect(compareParamValues('0603', 'X7R'), lessThan(0));
     // 都不可解析时按字典序
     expect(compareParamValues('C0G', 'X7R'), lessThan(0));
+  });
+
+  group('三量联动：余量 = 采购量 − 消耗量', () {
+    final dbPath = '${Directory.current.path}/.dart_tool/qty_test.db';
+    var materialId = 0;
+
+    setUpAll(() async {
+      final file = File(dbPath);
+      if (file.existsSync()) file.deleteSync();
+      await AppDatabase.instance.init(overridePath: dbPath);
+      final now = DateTime.now();
+      materialId = await MaterialRepository.insert(
+        MaterialItem(
+          name: '测试电阻',
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+    });
+
+    tearDownAll(() async {
+      await AppDatabase.instance.close();
+    });
+
+    test('改采购量 / 消耗量 → 自动算余量', () async {
+      await StockService.adjustField(
+        materialId: materialId,
+        field: StockService.fieldPurchased,
+        value: 100,
+      );
+      var item = await MaterialRepository.byId(materialId);
+      expect([item!.qtyPurchased, item.qtyUsed, item.qtyRemaining], [100, 0, 100]);
+
+      await StockService.adjustField(
+        materialId: materialId,
+        field: StockService.fieldUsed,
+        value: 30,
+      );
+      item = await MaterialRepository.byId(materialId);
+      expect([item!.qtyPurchased, item.qtyUsed, item.qtyRemaining], [100, 30, 70]);
+    });
+
+    test('改余量 → 反推消耗量（采购量不变）', () async {
+      await StockService.adjustField(
+        materialId: materialId,
+        field: StockService.fieldRemaining,
+        value: 50,
+      );
+      final item = await MaterialRepository.byId(materialId);
+      expect([item!.qtyPurchased, item.qtyUsed, item.qtyRemaining], [100, 50, 50]);
+    });
+
+    test('每次校正都记一条流水', () async {
+      final txs = await TransactionRepository.byMaterial(materialId);
+      expect(txs.length, 3);
+      expect(txs.first.note, contains('余量'));
+      expect(txs.first.remainingAfter, 50);
+    });
   });
 }
