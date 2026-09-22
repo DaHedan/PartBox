@@ -434,12 +434,12 @@ class _TxRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                formatQtySigned(tx.qty),
+                tx.qty == 0 ? '—' : formatQtySigned(tx.qty),
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                   fontFeatures: kTabularFigures,
-                  color: color,
+                  color: tx.qty == 0 ? palette.textSub : color,
                 ),
               ),
               Text(

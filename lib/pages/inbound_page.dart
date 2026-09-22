@@ -7,6 +7,7 @@ import '../data/lcsc/lcsc_service.dart';
 import '../data/models.dart';
 import '../data/repositories/location_repository.dart';
 import '../data/repositories/material_repository.dart';
+import '../data/seed_data.dart';
 import '../data/stock_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -17,7 +18,7 @@ import 'material_detail_page.dart';
 import 'material_edit_page.dart';
 import 'scan_page.dart';
 
-/// P10 入库流程（F13）：选仓库 → 选物料 → 填数量 → 入库（连续入库）。
+/// P10 入库流程（F13）：选仓库 → 选物料 → 确认入库（只归档，连续入库）。
 class InboundPage extends StatefulWidget {
   const InboundPage({super.key, this.presetLocationId});
 
@@ -28,13 +29,11 @@ class InboundPage extends StatefulWidget {
 }
 
 class _InboundPageState extends State<InboundPage> {
-  final TextEditingController _qty = TextEditingController(text: '1');
   final TextEditingController _note = TextEditingController();
 
   late final Future<List<Location>> _locationsFuture = LocationRepository.all();
   final List<MaterialItem> _targets = [];
   int? _locationId;
-  bool _addToPurchased = true;
 
   @override
   void initState() {
@@ -45,7 +44,6 @@ class _InboundPageState extends State<InboundPage> {
 
   @override
   void dispose() {
-    _qty.dispose();
     _note.dispose();
     super.dispose();
   }
@@ -173,33 +171,26 @@ class _InboundPageState extends State<InboundPage> {
       showToast(context, '请先选择要入库的物料');
       return;
     }
-    final qty = double.tryParse(_qty.text.trim());
-    if (qty == null || qty <= 0) {
-      showToast(context, '请输入大于 0 的入库数量');
-      return;
-    }
+    final locationId = _locationId ?? kUnassignedLocationId;
     final note = _note.text.trim();
     for (final target in _targets) {
-      await StockService.inbound(
+      await StockService.archiveInbound(
         materialId: target.id!,
-        qty: qty,
-        addToPurchased: _addToPurchased,
+        locationId: locationId,
         note: note.isEmpty ? null : note,
       );
     }
     if (!mounted) return;
-    final locationName = _locationId == null
-        ? '未分配'
-        : (await LocationRepository.byId(_locationId!))?.name ?? '未分配';
+    final locationName =
+        (await LocationRepository.byId(locationId))?.name ?? '未分配';
     if (!mounted) return;
     context.read<AppState>().notifyDataChanged();
     showToast(
       context,
-      '已入库 ${_targets.length} 种 × ${formatQty(qty)}（仓库：$locationName）',
+      '已入库 ${_targets.length} 种（仓库：$locationName）',
     );
     setState(() {
       _targets.clear();
-      _qty.text = '1';
       _note.clear();
     });
   }
@@ -355,43 +346,19 @@ class _InboundPageState extends State<InboundPage> {
                         const SizedBox(height: 10),
                       ],
                     const SizedBox(height: 12),
-                    _SectionTitle(title: '3 填写入库数量'),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _qty,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: '入库数量',
-                        hintText: '默认 1',
-                      ),
-                    ),
+                    _SectionTitle(title: '3 备注（可选）'),
                     const SizedBox(height: 12),
-                    CheckboxListTile(
-                      value: _addToPurchased,
-                      onChanged: (value) => setState(
-                        () => _addToPurchased = value ?? true,
-                      ),
-                      contentPadding: EdgeInsets.zero,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: const Text(
-                        '同步增加采购量',
-                        style: TextStyle(fontSize: 14),
-                      ),
-                      subtitle: Text(
-                        _addToPurchased
-                            ? '采购量 +n、余量 +n'
-                            : '仅余量 +n（采购量不变）',
-                        style: TextStyle(fontSize: 12, color: palette.textSub),
-                      ),
-                    ),
                     TextField(
                       controller: _note,
                       decoration: const InputDecoration(
-                        labelText: '备注（可选）',
+                        labelText: '备注',
                         hintText: '如：到货拆包',
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '入库只把物料归到所选仓库并记一条流水，数量以物料自身的采购量/余量为准。',
+                      style: TextStyle(fontSize: 12, color: palette.textSub),
                     ),
                     const SizedBox(height: 32),
                   ],

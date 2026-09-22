@@ -27,24 +27,20 @@ class StockService {
     );
   }
 
-  /// 入库：采购量 +n、余量 +n；[addToPurchased] 为 false 时仅余量 +n。
-  static Future<void> inbound({
+  /// 入库：只做归档——把物料归到所选仓库并记一条入库流水；
+  /// 数量不变（数量以「添加 / 编辑物料」时填写的采购量 / 余量为准）。
+  static Future<void> archiveInbound({
     required int materialId,
-    required double qty,
-    bool addToPurchased = true,
+    required int locationId,
     String? note,
   }) async {
-    if (qty <= 0) throw StateError('入库数量需大于 0');
     await _db.transaction((txn) async {
-      final (purchased, _, remaining) = await _readQty(txn, materialId);
-      final newPurchased = addToPurchased ? purchased + qty : purchased;
-      final newRemaining = remaining + qty;
+      final (_, _, remaining) = await _readQty(txn, materialId);
       final now = DateTime.now().millisecondsSinceEpoch;
       await txn.update(
         'materials',
         {
-          'qty_purchased': newPurchased,
-          'qty_remaining': newRemaining,
+          'location_id': locationId,
           'updated_at': now,
           'last_transaction_at': now,
         },
@@ -54,8 +50,8 @@ class StockService {
       await txn.insert('transactions', {
         'material_id': materialId,
         'type': TxType.inbound,
-        'qty': qty,
-        'remaining_after': newRemaining,
+        'qty': 0,
+        'remaining_after': remaining,
         'note': note,
         'created_at': now,
       });
