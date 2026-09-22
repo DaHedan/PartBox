@@ -87,90 +87,14 @@ class _CategoryPageState extends State<CategoryPage> {
     String? initialName,
     String? initialIcon,
   }) {
-    final controller = TextEditingController(text: initialName ?? '');
-    var icon = initialIcon ?? kSelectableIcons.first;
     return showDialog<(String, String?)>(
       context: context,
-      builder: (context) {
-        final palette = context.palette;
-        return StatefulBuilder(
-          builder: (context, setState) => AlertDialog(
-            title: Text(title),
-            content: SizedBox(
-              width: 320,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: controller,
-                    autofocus: true,
-                    decoration: const InputDecoration(hintText: '分类名称'),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    '图标',
-                    style: TextStyle(fontSize: 13, color: palette.textSub),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 160,
-                    child: GridView.count(
-                      crossAxisCount: 6,
-                      mainAxisSpacing: 8,
-                      crossAxisSpacing: 8,
-                      children: [
-                        for (final key in kSelectableIcons)
-                          InkWell(
-                            onTap: () => setState(() => icon = key),
-                            borderRadius: BorderRadius.circular(8),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: icon == key
-                                      ? palette.primary
-                                      : palette.border,
-                                  width: icon == key ? 1.6 : 1,
-                                ),
-                              ),
-                              child: Icon(
-                                iconForKey(key),
-                                size: 20,
-                                color: icon == key
-                                    ? palette.primary
-                                    : palette.textSub,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: Text('取消', style: TextStyle(color: palette.textSub)),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(minimumSize: const Size(80, 40)),
-                onPressed: () {
-                  final name = controller.text.trim();
-                  if (name.isEmpty) {
-                    showToast(context, '请输入分类名称');
-                    return;
-                  }
-                  Navigator.of(context).pop((name, icon));
-                },
-                child: const Text('确定'),
-              ),
-            ],
-          ),
-        );
-      },
-    ).whenComplete(controller.dispose);
+      builder: (_) => _CategoryDialog(
+        title: title,
+        initialName: initialName,
+        initialIcon: initialIcon,
+      ),
+    );
   }
 
   @override
@@ -332,6 +256,125 @@ class _CategoryPageState extends State<CategoryPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 分类名称 + 图标选择对话框。
+///
+/// 输入框控制器由对话框自身持有（随 State 一起销毁），
+/// 避免在退场动画期间被外部提前 dispose 导致构建期异常。
+class _CategoryDialog extends StatefulWidget {
+  const _CategoryDialog({
+    required this.title,
+    this.initialName,
+    this.initialIcon,
+  });
+
+  final String title;
+  final String? initialName;
+  final String? initialIcon;
+
+  @override
+  State<_CategoryDialog> createState() => _CategoryDialogState();
+}
+
+class _CategoryDialogState extends State<_CategoryDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialName ?? '',
+  );
+  late String _icon = widget.initialIcon ?? kSelectableIcons.first;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _close([(String, String?)? result]) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    Navigator.of(context).pop(result);
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    if (name.isEmpty) {
+      showToast(context, '请输入分类名称');
+      return;
+    }
+    _close((name, _icon));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 320,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              onSubmitted: (_) => _submit(),
+              decoration: const InputDecoration(hintText: '分类名称'),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '图标',
+              style: TextStyle(fontSize: 13, color: palette.textSub),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 160,
+              child: GridView.count(
+                crossAxisCount: 6,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                children: [
+                  for (final key in kSelectableIcons)
+                    InkWell(
+                      onTap: () => setState(() => _icon = key),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: _icon == key
+                                ? palette.primary
+                                : palette.border,
+                            width: _icon == key ? 1.6 : 1,
+                          ),
+                        ),
+                        child: Icon(
+                          iconForKey(key),
+                          size: 20,
+                          color: _icon == key
+                              ? palette.primary
+                              : palette.textSub,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => _close(),
+          child: Text('取消', style: TextStyle(color: palette.textSub)),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(80, 40)),
+          onPressed: _submit,
+          child: const Text('确定'),
+        ),
+      ],
     );
   }
 }

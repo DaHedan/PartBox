@@ -12,51 +12,17 @@ Future<double?> showNumberDialog(
   String? suffix,
   String? hint,
   bool allowNegative = true,
-}) async {
-  final controller = TextEditingController(
-    text: initial == null ? '' : formatQty(initial),
-  );
-  final result = await showDialog<double>(
+}) {
+  return showDialog<double>(
     context: context,
-    builder: (context) {
-      final palette = context.palette;
-      return AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.numberWithOptions(
-            decimal: true,
-            signed: allowNegative,
-          ),
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[0-9\.\-]')),
-          ],
-          decoration: InputDecoration(hintText: hint ?? '请输入数字', suffixText: suffix),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('取消', style: TextStyle(color: palette.textSub)),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(80, 40)),
-            onPressed: () {
-              final value = double.tryParse(controller.text.trim());
-              if (value == null) {
-                showToast(context, '请输入有效数字');
-                return;
-              }
-              Navigator.of(context).pop(value);
-            },
-            child: const Text('确定'),
-          ),
-        ],
-      );
-    },
+    builder: (_) => _NumberDialog(
+      title: title,
+      initial: initial,
+      suffix: suffix,
+      hint: hint,
+      allowNegative: allowNegative,
+    ),
   );
-  controller.dispose();
-  return result;
 }
 
 /// 文本输入对话框（分类名/仓库名/备注）。
@@ -66,43 +32,162 @@ Future<String?> showTextDialog(
   String? initial,
   String? hint,
   int maxLines = 1,
-}) async {
-  final controller = TextEditingController(text: initial ?? '');
-  final result = await showDialog<String>(
+}) {
+  return showDialog<String>(
     context: context,
-    builder: (context) {
-      final palette = context.palette;
-      return AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: maxLines,
-          decoration: InputDecoration(hintText: hint),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('取消', style: TextStyle(color: palette.textSub)),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(80, 40)),
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isEmpty) {
-                showToast(context, '内容不能为空');
-                return;
-              }
-              Navigator.of(context).pop(text);
-            },
-            child: const Text('确定'),
-          ),
-        ],
-      );
-    },
+    builder: (_) => _TextDialog(
+      title: title,
+      initial: initial,
+      hint: hint,
+      maxLines: maxLines,
+    ),
   );
-  controller.dispose();
-  return result;
+}
+
+/// 关闭对话框前先收起焦点：带焦点的输入框会借助 keep-alive 阻止自身销毁，
+/// 若在退场动画中被祖先 InheritedWidget 带着一起卸载会触发框架断言。
+void _closeDialog(BuildContext context, [Object? result]) {
+  FocusManager.instance.primaryFocus?.unfocus();
+  Navigator.of(context).pop(result);
+}
+
+class _NumberDialog extends StatefulWidget {
+  const _NumberDialog({
+    required this.title,
+    this.initial,
+    this.suffix,
+    this.hint,
+    this.allowNegative = true,
+  });
+
+  final String title;
+  final double? initial;
+  final String? suffix;
+  final String? hint;
+  final bool allowNegative;
+
+  @override
+  State<_NumberDialog> createState() => _NumberDialogState();
+}
+
+class _NumberDialogState extends State<_NumberDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initial == null ? '' : formatQty(widget.initial!),
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final value = double.tryParse(_controller.text.trim());
+    if (value == null) {
+      showToast(context, '请输入有效数字');
+      return;
+    }
+    _closeDialog(context, value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        keyboardType: TextInputType.numberWithOptions(
+          decimal: true,
+          signed: widget.allowNegative,
+        ),
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp(r'[0-9\.\-]')),
+        ],
+        onSubmitted: (_) => _submit(),
+        decoration: InputDecoration(
+          hintText: widget.hint ?? '请输入数字',
+          suffixText: widget.suffix,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => _closeDialog(context),
+          child: Text('取消', style: TextStyle(color: palette.textSub)),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(80, 40)),
+          onPressed: _submit,
+          child: const Text('确定'),
+        ),
+      ],
+    );
+  }
+}
+
+class _TextDialog extends StatefulWidget {
+  const _TextDialog({
+    required this.title,
+    this.initial,
+    this.hint,
+    this.maxLines = 1,
+  });
+
+  final String title;
+  final String? initial;
+  final String? hint;
+  final int maxLines;
+
+  @override
+  State<_TextDialog> createState() => _TextDialogState();
+}
+
+class _TextDialogState extends State<_TextDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initial ?? '',
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) {
+      showToast(context, '内容不能为空');
+      return;
+    }
+    _closeDialog(context, text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLines: widget.maxLines,
+        onSubmitted: (_) => _submit(),
+        decoration: InputDecoration(hintText: widget.hint),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => _closeDialog(context),
+          child: Text('取消', style: TextStyle(color: palette.textSub)),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(80, 40)),
+          onPressed: _submit,
+          child: const Text('确定'),
+        ),
+      ],
+    );
+  }
 }
 
 /// 二次确认对话框。

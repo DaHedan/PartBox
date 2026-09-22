@@ -178,12 +178,7 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
         _locationId = existing.locationId ?? kUnassignedLocationId;
         _imagePath = existing.imagePath;
         _remainingTouched = true;
-        for (final row in _params) {
-          row.dispose();
-        }
-        _params
-          ..clear()
-          ..addAll(existing.params.map((p) => _ParamRow(p.k, p.v)));
+        _replaceParams(existing.params);
       }
     });
 
@@ -281,12 +276,7 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
     setState(() {
       _categoryId = sub?.id ?? top?.id;
       if (part.params.isNotEmpty) {
-        for (final row in _params) {
-          row.dispose();
-        }
-        _params
-          ..clear()
-          ..addAll(part.params.map((p) => _ParamRow(p.k, p.v)));
+        _replaceParams(part.params);
       }
     });
 
@@ -435,6 +425,28 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
     return trimmed.isEmpty ? null : trimmed;
   }
 
+  /// 替换参数行：旧行的控制器等其输入框卸载（下一帧）后再释放，
+  /// 避免输入框仍挂载时被 dispose 导致构建期异常。
+  void _replaceParams(Iterable<ParamEntry> params) {
+    final old = List<_ParamRow>.from(_params);
+    _params
+      ..clear()
+      ..addAll(params.map((p) => _ParamRow(p.k, p.v)));
+    if (old.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final row in old) {
+        row.dispose();
+      }
+    });
+  }
+
+  /// 删除单行参数（同样延后释放控制器）。
+  void _removeParamAt(int index) {
+    final row = _params[index];
+    setState(() => _params.removeAt(index));
+    WidgetsBinding.instance.addPostFrameCallback((_) => row.dispose());
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
@@ -579,9 +591,7 @@ class _MaterialEditPageState extends State<MaterialEditPage> {
                               size: 18,
                               color: palette.textSub,
                             ),
-                            onPressed: () => setState(() {
-                              _params.removeAt(i).dispose();
-                            }),
+                            onPressed: () => _removeParamAt(i),
                           ),
                         ],
                       ),
