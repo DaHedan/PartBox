@@ -7,16 +7,28 @@ import 'count_circle.dart';
 
 /// 仓库行：图标 + 名称 + 圆形数量（线框 06）。
 class LocationRow extends StatelessWidget {
-  const LocationRow({super.key, required this.location, this.onTap});
+  const LocationRow({
+    super.key,
+    required this.location,
+    this.onTap,
+    this.onLongPress,
+    this.onSecondaryTap,
+  });
 
   final Location location;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  /// 桌面端右键（进入多选）。
+  final VoidCallback? onSecondaryTap;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
+      onSecondaryTap: onSecondaryTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(

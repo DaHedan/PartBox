@@ -7,9 +7,12 @@ import '../data/repositories/material_repository.dart';
 import '../data/seed_data.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
+import '../utils/format.dart';
+import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/facet_filter.dart';
 import '../widgets/material_card.dart';
+import '../widgets/multi_select.dart';
 import 'material_detail_page.dart';
 import 'search_page.dart';
 
@@ -52,7 +55,8 @@ class _FilterData {
   final List<Category> subcategories;
 }
 
-class _CategoryFilterPageState extends State<CategoryFilterPage> {
+class _CategoryFilterPageState extends State<CategoryFilterPage>
+    with MultiSelectMixin<CategoryFilterPage> {
   late Future<_FilterData> _future = _load();
   int _revision = -1;
 
@@ -60,6 +64,9 @@ class _CategoryFilterPageState extends State<CategoryFilterPage> {
   bool _lowStockOnly = false;
   bool _unassignedOnly = false;
   _SortMode _sort = _SortMode.updated;
+
+  /// 当前结果集里的物料 id（供全选/批量删除使用）。
+  List<int> _visibleIds = const [];
 
   Future<_FilterData> _load() async {
     final materials = await MaterialRepository.byTopCategory(
@@ -285,6 +292,26 @@ class _CategoryFilterPageState extends State<CategoryFilterPage> {
     }
   }
 
+  Future<void> _deleteSelected() async {
+    final ids = selectedIds.toList();
+    if (ids.isEmpty) return;
+    final ok = await showConfirmDialog(
+      context,
+      title: '批量删除物料',
+      message: '确定删除选中的 ${ids.length} 种物料？\n每种物料的库存流水将一并删除，且不可恢复。',
+      confirmText: '删除',
+      danger: true,
+    );
+    if (!ok) return;
+    for (final id in ids) {
+      await MaterialRepository.delete(id);
+    }
+    if (!mounted) return;
+    exitSelection();
+    context.read<AppState>().notifyDataChanged();
+    showToast(context, '已删除 ${ids.length} 种物料');
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
@@ -295,28 +322,48 @@ class _CategoryFilterPageState extends State<CategoryFilterPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.topCategoryName),
-        actions: [
-          PopupMenuButton<_SortMode>(
-            icon: const Icon(Icons.swap_vert),
-            tooltip: '排序',
-            initialValue: _sort,
-            onSelected: (value) => setState(() => _sort = value),
-            itemBuilder: (context) => [
-              for (final entry in _sortLabels.entries)
-                PopupMenuItem(value: entry.key, child: Text(entry.value)),
-            ],
-          ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: '搜索',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SearchPage()),
+      appBar: selecting
+          ? SelectionAppBar(
+              count: selectedIds.length,
+              allSelected: _visibleIds.isNotEmpty &&
+                  selectedIds.length == _visibleIds.length,
+              onSelectAll: () => setSelection(
+                selectedIds.length == _visibleIds.length
+                    ? const <int>[]
+                    : _visibleIds,
+              ),
+              onDelete: _deleteSelected,
+              onExit: exitSelection,
+            )
+          : AppBar(
+              title: Text(widget.topCategoryName),
+              actions: [
+                PopupMenuButton<_SortMode>(
+                  icon: const Icon(Icons.swap_vert),
+                  tooltip: '排序',
+                  initialValue: _sort,
+                  onSelected: (value) => setState(() => _sort = value),
+                  itemBuilder: (context) => [
+                    for (final entry in _sortLabels.entries)
+                      PopupMenuItem(value: entry.key, child: Text(entry.value)),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.checklist),
+                  tooltip: '批量删除',
+                  onPressed: _visibleIds.isEmpty
+                      ? null
+                      : () => enterSelection(),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.search),
+                  tooltip: '搜索',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SearchPage()),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
       body: FutureBuilder<_FilterData>(
         future: _future,
         builder: (context, snapshot) {
@@ -329,6 +376,7 @@ class _CategoryFilterPageState extends State<CategoryFilterPage> {
           _sortItems(filtered);
           final groups = _buildGroups(data, appState, filtered);
           final chips = _chips(groups);
+          _visibleIds = [for (final item in filtered) item.id!];
 
           return Column(
             children: [
@@ -397,12 +445,32 @@ class _CategoryFilterPageState extends State<CategoryFilterPage> {
                             item: item,
                             lowStock: appState.isLowStock(item),
                             iconKey: item.categoryIcon,
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    MaterialDetailPage(materialId: item.id!),
-                              ),
-                            ),
+                            selected: selectedIds.contains(item.id),
+                            trailing: selecting
+                                ? SelectCheck(
+                                    checked: selectedIds.contains(item.id),
+                                  )
+                                : null,
+                            onTap: () {
+                              if (selecting) {
+                                toggleSelected(item.id!);
+                                return;
+                              }
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      MaterialDetailPage(materialId: item.id!),
+                                ),
+                              );
+                            },
+                            onLongPress:
+                                selecting || useSecondaryTapSelection
+                                ? null
+                                : () => enterSelection(item.id!),
+                            onSecondaryTap:
+                                selecting || !useSecondaryTapSelection
+                                ? null
+                                : () => enterSelection(item.id!),
                           );
                         },
                       ),

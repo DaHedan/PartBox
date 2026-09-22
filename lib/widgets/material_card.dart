@@ -15,6 +15,7 @@ class MaterialCard extends StatelessWidget {
     this.iconKey,
     this.onTap,
     this.onLongPress,
+    this.onSecondaryTap,
     this.trailing,
     this.selected = false,
   });
@@ -24,6 +25,9 @@ class MaterialCard extends StatelessWidget {
   final String? iconKey;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  /// 桌面端右键（进入多选）。
+  final VoidCallback? onSecondaryTap;
 
   /// 追加在余量右侧的内容（如多选勾选框）。
   final Widget? trailing;
@@ -54,6 +58,7 @@ class MaterialCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         onLongPress: onLongPress,
+        onSecondaryTap: onSecondaryTap,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(

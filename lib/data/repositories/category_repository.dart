@@ -153,10 +153,13 @@ class CategoryRepository {
     return (rows.first['c'] as num).toInt();
   }
 
-  /// 删除分类；若分类下存在物料则抛出 [StateError]。
+  /// 删除分类；内置分类（立创预置 23 类及"未分类"）不可删除，
+  /// 分类下存在物料时抛出 [StateError]。
   static Future<void> delete(int id) async {
-    if (id == kUncategorizedCategoryId) {
-      throw StateError('内置"未分类"不可删除');
+    final category = await byId(id);
+    if (category == null) return;
+    if (category.builtin) {
+      throw StateError('内置分类不可删除');
     }
     final count = await materialCountUnder(id);
     if (count > 0) {

@@ -8,6 +8,7 @@ import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/multi_select.dart';
 
 /// 子类管理（大类下的子类，增 / 删 / 改 / 排序）。
 class SubcategoryPage extends StatefulWidget {
@@ -24,11 +25,55 @@ class SubcategoryPage extends StatefulWidget {
   State<SubcategoryPage> createState() => _SubcategoryPageState();
 }
 
-class _SubcategoryPageState extends State<SubcategoryPage> {
+class _SubcategoryPageState extends State<SubcategoryPage>
+    with MultiSelectMixin<SubcategoryPage> {
   late Future<List<Category>> _future = CategoryRepository.subcategoriesWithCount(
     widget.topCategoryId,
   );
   int _revision = -1;
+
+  /// 可批量删除的子类 id（内置子类不可删，故不进"全选"范围）。
+  List<int> _visibleIds = const [];
+
+  Future<void> _deleteSelected() async {
+    final ids = selectedIds.toList();
+    if (ids.isEmpty) return;
+    final ok = await showConfirmDialog(
+      context,
+      title: '批量删除子类',
+      message: '确定删除选中的 ${ids.length} 个自定义子类？',
+      confirmText: '删除',
+      danger: true,
+    );
+    if (!ok) return;
+    var deleted = 0;
+    String? blocked;
+    for (final id in ids) {
+      try {
+        await CategoryRepository.delete(id);
+        deleted++;
+      } on StateError catch (error) {
+        blocked = error.message;
+        break;
+      }
+    }
+    if (!mounted) return;
+    exitSelection();
+    context.read<AppState>().notifyDataChanged();
+    showToast(
+      context,
+      blocked == null ? '已删除 $deleted 个子类' : '已删除 $deleted 个；$blocked',
+    );
+  }
+
+  /// 内置子类不可删。
+  void _enterSelectionFor(Category category) {
+    if (category.builtin) {
+      showToast(context, '内置子类不可删除');
+      return;
+    }
+    enterSelection(category.id);
+  }
 
   Future<void> _add() async {
     final name = await showTextDialog(
@@ -60,7 +105,36 @@ class _SubcategoryPageState extends State<SubcategoryPage> {
     context.read<AppState>().notifyDataChanged();
   }
 
+  /// 子类行右侧"更多"菜单（内置子类不提供删除项）。
+  Widget _menuButton(Category category, bool selectable) {
+    return PopupMenuButton<String>(
+      icon: Icon(Icons.more_vert, size: 20, color: context.palette.textSub),
+      onSelected: (value) {
+        if (value == 'rename') {
+          _rename(category);
+        } else if (value == 'up') {
+          _move(category, -1);
+        } else if (value == 'down') {
+          _move(category, 1);
+        } else {
+          _delete(category);
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(value: 'rename', child: Text('重命名')),
+        const PopupMenuItem(value: 'up', child: Text('上移')),
+        const PopupMenuItem(value: 'down', child: Text('下移')),
+        if (selectable)
+          const PopupMenuItem(value: 'delete', child: Text('删除')),
+      ],
+    );
+  }
+
   Future<void> _delete(Category category) async {
+    if (category.builtin) {
+      showToast(context, '内置子类不可删除');
+      return;
+    }
     final count = await CategoryRepository.materialCountUnder(category.id!);
     if (!mounted) return;
     if (count > 0) {
@@ -90,7 +164,31 @@ class _SubcategoryPageState extends State<SubcategoryPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text('${widget.topCategoryName} · 子类')),
+      appBar: selecting
+          ? SelectionAppBar(
+              count: selectedIds.length,
+              allSelected: _visibleIds.isNotEmpty &&
+                  selectedIds.length == _visibleIds.length,
+              onSelectAll: () => setSelection(
+                selectedIds.length == _visibleIds.length
+                    ? const <int>[]
+                    : _visibleIds,
+              ),
+              onDelete: _deleteSelected,
+              onExit: exitSelection,
+            )
+          : AppBar(
+              title: Text('${widget.topCategoryName} · 子类'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.checklist),
+                  tooltip: '批量删除',
+                  onPressed: _visibleIds.isEmpty
+                      ? null
+                      : () => enterSelection(),
+                ),
+              ],
+            ),
       body: Column(
         children: [
           Expanded(
@@ -98,6 +196,11 @@ class _SubcategoryPageState extends State<SubcategoryPage> {
               future: _future,
               builder: (context, snapshot) {
                 final items = snapshot.data ?? const <Category>[];
+                // 内置子类不可删，也不算进"全选"
+                _visibleIds = [
+                  for (final item in items)
+                    if (!item.builtin) item.id!,
+                ];
                 if (items.isEmpty) {
                   return const EmptyState(
                     icon: Icons.category_outlined,
@@ -110,69 +213,68 @@ class _SubcategoryPageState extends State<SubcategoryPage> {
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
                     final category = items[index];
+                    final selectable = !category.builtin;
+                    final checked = selectedIds.contains(category.id);
                     return Card(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 4,
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                ),
-                                child: Text(
-                                  category.name,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: palette.text,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () {
+                          if (!selecting) return;
+                          if (!selectable) {
+                            showToast(context, '内置子类不可删除');
+                            return;
+                          }
+                          toggleSelected(category.id!);
+                        },
+                        onLongPress: selecting || useSecondaryTapSelection
+                            ? null
+                            : () => _enterSelectionFor(category),
+                        onSecondaryTap: selecting || !useSecondaryTapSelection
+                            ? null
+                            : () => _enterSelectionFor(category),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  child: Text(
+                                    category.name,
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: palette.text,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                            Text(
-                              '${category.materialCount} 种',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: palette.textSub,
+                              Text(
+                                '${category.materialCount} 种',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: palette.textSub,
+                                ),
                               ),
-                            ),
-                            PopupMenuButton<String>(
-                              icon: Icon(
-                                Icons.more_vert,
-                                size: 20,
-                                color: palette.textSub,
-                              ),
-                              onSelected: (value) {
-                                if (value == 'rename') {
-                                  _rename(category);
-                                } else if (value == 'up') {
-                                  _move(category, -1);
-                                } else if (value == 'down') {
-                                  _move(category, 1);
-                                } else {
-                                  _delete(category);
-                                }
-                              },
-                              itemBuilder: (context) => const [
-                                PopupMenuItem(
-                                  value: 'rename',
-                                  child: Text('重命名'),
-                                ),
-                                PopupMenuItem(value: 'up', child: Text('上移')),
-                                PopupMenuItem(
-                                  value: 'down',
-                                  child: Text('下移'),
-                                ),
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: Text('删除'),
-                                ),
-                              ],
-                            ),
-                          ],
+                              if (selecting)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 4),
+                                  child: selectable
+                                      ? SelectCheck(checked: checked)
+                                      : Icon(
+                                          Icons.lock_outline,
+                                          size: 20,
+                                          color: palette.textSub,
+                                        ),
+                                )
+                              else
+                                _menuButton(category, selectable),
+                            ],
+                          ),
                         ),
                       ),
                     );
@@ -181,14 +283,15 @@ class _SubcategoryPageState extends State<SubcategoryPage> {
               },
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: FilledButton.icon(
-              onPressed: _add,
-              icon: const Icon(Icons.add),
-              label: const Text('添加子类'),
+          if (!selecting)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: FilledButton.icon(
+                onPressed: _add,
+                icon: const Icon(Icons.add),
+                label: const Text('添加子类'),
+              ),
             ),
-          ),
         ],
       ),
     );

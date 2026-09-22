@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/material_card.dart';
+import '../widgets/multi_select.dart';
 import '../widgets/stat_card.dart';
 import 'inbound_page.dart';
 import 'material_detail_page.dart';
@@ -30,9 +31,33 @@ class _LocationDetailData {
   final List<MaterialItem> materials;
 }
 
-class _LocationDetailPageState extends State<LocationDetailPage> {
+class _LocationDetailPageState extends State<LocationDetailPage>
+    with MultiSelectMixin<LocationDetailPage> {
   late Future<_LocationDetailData> _future = _load();
   int _revision = -1;
+
+  /// 当前仓库内的物料 id（供全选/批量删除使用）。
+  List<int> _visibleIds = const [];
+
+  Future<void> _deleteSelected() async {
+    final ids = selectedIds.toList();
+    if (ids.isEmpty) return;
+    final ok = await showConfirmDialog(
+      context,
+      title: '批量删除物料',
+      message: '确定删除选中的 ${ids.length} 种物料？\n每种物料的库存流水将一并删除，且不可恢复。',
+      confirmText: '删除',
+      danger: true,
+    );
+    if (!ok) return;
+    for (final id in ids) {
+      await MaterialRepository.delete(id);
+    }
+    if (!mounted) return;
+    exitSelection();
+    context.read<AppState>().notifyDataChanged();
+    showToast(context, '已删除 ${ids.length} 种物料');
+  }
 
   Future<_LocationDetailData> _load() async {
     final location = await LocationRepository.stats(widget.locationId);
@@ -64,7 +89,31 @@ class _LocationDetailPageState extends State<LocationDetailPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text('仓库详情')),
+      appBar: selecting
+          ? SelectionAppBar(
+              count: selectedIds.length,
+              allSelected: _visibleIds.isNotEmpty &&
+                  selectedIds.length == _visibleIds.length,
+              onSelectAll: () => setSelection(
+                selectedIds.length == _visibleIds.length
+                    ? const <int>[]
+                    : _visibleIds,
+              ),
+              onDelete: _deleteSelected,
+              onExit: exitSelection,
+            )
+          : AppBar(
+              title: const Text('仓库详情'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.checklist),
+                  tooltip: '批量删除',
+                  onPressed: _visibleIds.isEmpty
+                      ? null
+                      : () => enterSelection(),
+                ),
+              ],
+            ),
       body: FutureBuilder<_LocationDetailData>(
         future: _future,
         builder: (context, snapshot) {
@@ -74,6 +123,7 @@ class _LocationDetailPageState extends State<LocationDetailPage> {
           }
           final location = data.location;
           final materials = data.materials;
+          _visibleIds = [for (final item in materials) item.id!];
           return Column(
             children: [
               Expanded(
@@ -146,31 +196,52 @@ class _LocationDetailPageState extends State<LocationDetailPage> {
                           item: item,
                           lowStock: appState.isLowStock(item),
                           iconKey: item.categoryIcon,
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  MaterialDetailPage(materialId: item.id!),
-                            ),
-                          ),
+                          selected: selectedIds.contains(item.id),
+                          trailing: selecting
+                              ? SelectCheck(
+                                  checked: selectedIds.contains(item.id),
+                                )
+                              : null,
+                          onTap: () {
+                            if (selecting) {
+                              toggleSelected(item.id!);
+                              return;
+                            }
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    MaterialDetailPage(materialId: item.id!),
+                              ),
+                            );
+                          },
+                          onLongPress:
+                              selecting || useSecondaryTapSelection
+                              ? null
+                              : () => enterSelection(item.id!),
+                          onSecondaryTap:
+                              selecting || !useSecondaryTapSelection
+                              ? null
+                              : () => enterSelection(item.id!),
                         ),
                         const SizedBox(height: 10),
                       ],
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: FilledButton.icon(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          InboundPage(presetLocationId: widget.locationId),
+              if (!selecting)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: FilledButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            InboundPage(presetLocationId: widget.locationId),
+                      ),
                     ),
+                    icon: const Icon(Icons.add),
+                    label: const Text('添加物料'),
                   ),
-                  icon: const Icon(Icons.add),
-                  label: const Text('添加物料'),
                 ),
-              ),
             ],
           );
         },

@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../data/models.dart';
 import '../data/repositories/category_repository.dart';
-import '../data/seed_data.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/category_icons.dart';
@@ -12,6 +11,7 @@ import '../widgets/app_drawer.dart';
 import '../widgets/category_icon.dart';
 import '../widgets/dialogs.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/multi_select.dart';
 import 'category_filter_page.dart';
 import 'search_page.dart';
 import 'subcategory_page.dart';
@@ -24,9 +24,53 @@ class CategoryPage extends StatefulWidget {
   State<CategoryPage> createState() => _CategoryPageState();
 }
 
-class _CategoryPageState extends State<CategoryPage> {
+class _CategoryPageState extends State<CategoryPage>
+    with MultiSelectMixin<CategoryPage> {
   late Future<List<Category>> _future = CategoryRepository.topCategories();
   int _revision = -1;
+
+  /// 可批量删除的大类 id（内置分类不可删，故不进"全选"范围）。
+  List<int> _visibleIds = const [];
+
+  Future<void> _deleteSelected() async {
+    final ids = selectedIds.toList();
+    if (ids.isEmpty) return;
+    final ok = await showConfirmDialog(
+      context,
+      title: '批量删除分类',
+      message: '确定删除选中的 ${ids.length} 个自定义大类及其子类？',
+      confirmText: '删除',
+      danger: true,
+    );
+    if (!ok) return;
+    var deleted = 0;
+    String? blocked;
+    for (final id in ids) {
+      try {
+        await CategoryRepository.delete(id);
+        deleted++;
+      } on StateError catch (error) {
+        blocked = error.message;
+        break;
+      }
+    }
+    if (!mounted) return;
+    exitSelection();
+    context.read<AppState>().notifyDataChanged();
+    showToast(
+      context,
+      blocked == null ? '已删除 $deleted 个分类' : '已删除 $deleted 个；$blocked',
+    );
+  }
+
+  /// 内置分类（立创预置 23 类）不可删。
+  void _enterSelectionFor(Category category) {
+    if (category.builtin) {
+      showToast(context, '内置分类不可删除');
+      return;
+    }
+    enterSelection(category.id);
+  }
 
   Future<void> _createTop() async {
     final result = await _editDialog(title: '自定义大类');
@@ -52,8 +96,8 @@ class _CategoryPageState extends State<CategoryPage> {
   }
 
   Future<void> _deleteTop(Category category) async {
-    if (category.id == kUncategorizedCategoryId) {
-      showToast(context, '内置"未分类"不可删除');
+    if (category.builtin) {
+      showToast(context, '内置分类不可删除');
       return;
     }
     final count = await CategoryRepository.materialCountUnder(category.id!);
@@ -79,6 +123,42 @@ class _CategoryPageState extends State<CategoryPage> {
     await CategoryRepository.moveSort(category.id!, delta);
     if (!mounted) return;
     context.read<AppState>().notifyDataChanged();
+  }
+
+  /// 大类行右侧"更多"菜单（内置分类不提供删除项）。
+  Widget _menuButton(Category category, bool selectable) {
+    return PopupMenuButton<String>(
+      icon: Icon(Icons.more_vert, size: 20, color: context.palette.textSub),
+      onSelected: (value) {
+        switch (value) {
+          case 'edit':
+            _editTop(category);
+          case 'sub':
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SubcategoryPage(
+                  topCategoryId: category.id!,
+                  topCategoryName: category.name,
+                ),
+              ),
+            );
+          case 'up':
+            _move(category, -1);
+          case 'down':
+            _move(category, 1);
+          case 'delete':
+            _deleteTop(category);
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(value: 'edit', child: Text('编辑')),
+        const PopupMenuItem(value: 'sub', child: Text('管理子类')),
+        const PopupMenuItem(value: 'up', child: Text('上移')),
+        const PopupMenuItem(value: 'down', child: Text('下移')),
+        if (selectable)
+          const PopupMenuItem(value: 'delete', child: Text('删除')),
+      ],
+    );
   }
 
   /// 名称 + 图标的编辑对话框。
@@ -107,19 +187,39 @@ class _CategoryPageState extends State<CategoryPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(
-        leading: const DrawerMenuButton(),
-        title: const Text('分类'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: '搜索',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SearchPage()),
+      appBar: selecting
+          ? SelectionAppBar(
+              count: selectedIds.length,
+              allSelected: _visibleIds.isNotEmpty &&
+                  selectedIds.length == _visibleIds.length,
+              onSelectAll: () => setSelection(
+                selectedIds.length == _visibleIds.length
+                    ? const <int>[]
+                    : _visibleIds,
+              ),
+              onDelete: _deleteSelected,
+              onExit: exitSelection,
+            )
+          : AppBar(
+              leading: const DrawerMenuButton(),
+              title: const Text('分类'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.checklist),
+                  tooltip: '批量删除',
+                  onPressed: _visibleIds.isEmpty
+                      ? null
+                      : () => enterSelection(),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.search),
+                  tooltip: '搜索',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SearchPage()),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
       drawer: const AppDrawer(current: RootPage.category),
       body: Column(
         children: [
@@ -128,6 +228,11 @@ class _CategoryPageState extends State<CategoryPage> {
               future: _future,
               builder: (context, snapshot) {
                 final categories = snapshot.data ?? const <Category>[];
+                // 内置分类不可删，也不算进"全选"
+                _visibleIds = [
+                  for (final category in categories)
+                    if (!category.builtin) category.id!,
+                ];
                 if (categories.isEmpty) {
                   return const EmptyState(
                     icon: Icons.grid_view_outlined,
@@ -140,18 +245,36 @@ class _CategoryPageState extends State<CategoryPage> {
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
                     final category = categories[index];
+                    // 内置（立创预置）分类不可删
+                    final selectable = !category.builtin;
+                    final checked = selectedIds.contains(category.id);
                     return Card(
                       child: InkWell(
                         borderRadius: BorderRadius.circular(12),
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => CategoryFilterPage(
-                              topCategoryId: category.id!,
-                              topCategoryName: category.name,
+                        onTap: () {
+                          if (selecting) {
+                            if (!selectable) {
+                              showToast(context, '内置分类不可删除');
+                              return;
+                            }
+                            toggleSelected(category.id!);
+                            return;
+                          }
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => CategoryFilterPage(
+                                topCategoryId: category.id!,
+                                topCategoryName: category.name,
+                              ),
                             ),
-                          ),
-                        ),
-                        onLongPress: () => _editTop(category),
+                          );
+                        },
+                        onLongPress: selecting || useSecondaryTapSelection
+                            ? null
+                            : () => _enterSelectionFor(category),
+                        onSecondaryTap: selecting || !useSecondaryTapSelection
+                            ? null
+                            : () => _enterSelectionFor(category),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
@@ -184,58 +307,19 @@ class _CategoryPageState extends State<CategoryPage> {
                                   color: palette.textSub,
                                 ),
                               ),
-                              PopupMenuButton<String>(
-                                icon: Icon(
-                                  Icons.more_vert,
-                                  size: 20,
-                                  color: palette.textSub,
-                                ),
-                                onSelected: (value) {
-                                  switch (value) {
-                                    case 'edit':
-                                      _editTop(category);
-                                    case 'sub':
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (_) => SubcategoryPage(
-                                            topCategoryId: category.id!,
-                                            topCategoryName: category.name,
-                                          ),
+                              if (selecting)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 4),
+                                  child: selectable
+                                      ? SelectCheck(checked: checked)
+                                      : Icon(
+                                          Icons.lock_outline,
+                                          size: 20,
+                                          color: palette.textSub,
                                         ),
-                                      );
-                                    case 'up':
-                                      _move(category, -1);
-                                    case 'down':
-                                      _move(category, 1);
-                                    case 'delete':
-                                      _deleteTop(category);
-                                  }
-                                },
-                                itemBuilder: (context) => [
-                                  const PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('编辑'),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: 'sub',
-                                    child: Text('管理子类'),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: 'up',
-                                    child: Text('上移'),
-                                  ),
-                                  const PopupMenuItem(
-                                    value: 'down',
-                                    child: Text('下移'),
-                                  ),
-                                  if (category.id !=
-                                      kUncategorizedCategoryId)
-                                    const PopupMenuItem(
-                                      value: 'delete',
-                                      child: Text('删除'),
-                                    ),
-                                ],
-                              ),
+                                )
+                              else
+                                _menuButton(category, selectable),
                             ],
                           ),
                         ),
@@ -246,14 +330,15 @@ class _CategoryPageState extends State<CategoryPage> {
               },
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: OutlinedButton.icon(
-              onPressed: _createTop,
-              icon: const Icon(Icons.add),
-              label: const Text('自定义'),
+          if (!selecting)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: OutlinedButton.icon(
+                onPressed: _createTop,
+                icon: const Icon(Icons.add),
+                label: const Text('自定义'),
+              ),
             ),
-          ),
         ],
       ),
     );
