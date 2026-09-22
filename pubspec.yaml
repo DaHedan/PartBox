@@ -45,6 +45,8 @@ dependencies:
   image_picker: ^1.2.3
   mobile_scanner: ^7.4.2
   intl: ^0.20.3
+  excel: ^4.0.6
+  desktop_drop: ^0.8.0
 
 dev_dependencies:
   flutter_test:

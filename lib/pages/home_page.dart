@@ -7,6 +7,7 @@ import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/count_circle.dart';
+import 'bom_project_list_page.dart';
 import 'inbound_page.dart';
 import 'location_detail_page.dart';
 import 'placeholder_page.dart';
@@ -60,13 +61,11 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     _BigCard(
                       title: 'BOM 对照',
-                      subtitle: '导入 BOM，对照库存查缺料',
+                      subtitle: '导入嘉立创 BOM，四色比对库存后双导出',
+                      badge: null,
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => const PlaceholderPage(
-                            title: 'BOM 对照',
-                            description: '导入 xlsx/csv/立创 BOM，按 C编号 · MPN · 值+封装\n匹配库存并生成缺料清单。',
-                          ),
+                          builder: (_) => const BomProjectListPage(),
                         ),
                       ),
                     ),
@@ -202,11 +201,15 @@ class _BigCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.badge = '预留',
   });
 
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+
+  /// 右上角角标；_null_ 表示已正式启用（不显示）。
+  final String? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -242,20 +245,22 @@ class _BigCard extends StatelessWidget {
               Positioned(
                 top: 10,
                 right: 12,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: palette.border.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    '预留',
-                    style: TextStyle(fontSize: 11, color: palette.textSub),
-                  ),
-                ),
+                child: badge == null
+                    ? const SizedBox.shrink()
+                    : Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: palette.border.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          badge!,
+                          style: TextStyle(fontSize: 11, color: palette.textSub),
+                        ),
+                      ),
               ),
             ],
           ),

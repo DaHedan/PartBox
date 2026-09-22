@@ -309,6 +309,207 @@ class MaterialItem {
   );
 }
 
+/// F10 BOM 工程：一次导入生成一个工程，比对结果可反复打开。
+class BomProject {
+  const BomProject({
+    this.id,
+    required this.name,
+    this.fileName,
+    this.source,
+    this.note,
+    required this.createdAt,
+    required this.updatedAt,
+    this.itemCount = 0,
+    this.checkedCount = 0,
+  });
+
+  final int? id;
+  final String name;
+  final String? fileName;
+
+  /// 来源标识：lcsc-xlsx（嘉立创 xlsx）/ csv（手动列映射）。
+  final String? source;
+  final String? note;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  /// 联表统计，不落库。
+  final int itemCount;
+  final int checkedCount;
+
+  Map<String, dynamic> toMap() => {
+    if (id != null) 'id': id,
+    'name': name,
+    'file_name': fileName,
+    'source': source,
+    'note': note,
+    'created_at': createdAt.millisecondsSinceEpoch,
+    'updated_at': updatedAt.millisecondsSinceEpoch,
+  };
+
+  factory BomProject.fromMap(Map<String, Object?> map) => BomProject(
+    id: map['id'] as int?,
+    name: (map['name'] ?? '') as String,
+    fileName: map['file_name'] as String?,
+    source: map['source'] as String?,
+    note: map['note'] as String?,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(
+      ((map['created_at'] ?? 0) as num).toInt(),
+    ),
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(
+      ((map['updated_at'] ?? 0) as num).toInt(),
+    ),
+    itemCount: ((map['item_count'] ?? 0) as num).toInt(),
+    checkedCount: ((map['checked_count'] ?? 0) as num).toInt(),
+  );
+}
+
+/// F10.2 四色标记。
+class MatchStatus {
+  static const blue = 'blue';
+  static const green = 'green';
+  static const yellow = 'yellow';
+  static const red = 'red';
+
+  static const List<String> all = [blue, green, yellow, red];
+
+  static String label(String? status) {
+    switch (status) {
+      case blue:
+        return '完全一致';
+      case green:
+        return '重要参数一致';
+      case yellow:
+        return '核心参数一致';
+      case red:
+        return '无匹配';
+      default:
+        return '未比对';
+    }
+  }
+
+  /// 默认勾选规则（F10.3）：黄 + 红。
+  static bool defaultChecked(String? status) =>
+      status == yellow || status == red;
+}
+
+/// F10 一行 BOM 条目。
+class BomItem {
+  const BomItem({
+    this.id,
+    required this.bomProjectId,
+    this.designator = '',
+    this.comment = '',
+    this.footprint = '',
+    this.value = '',
+    this.mpn = '',
+    this.manufacturer = '',
+    this.lcscCode = '',
+    this.supplier = '',
+    this.unitPrice,
+    this.quantity = 0,
+    this.materialId,
+    this.sort = 0,
+    this.matchStatus,
+    this.matchedMaterialId,
+    this.checked = false,
+  });
+
+  final int? id;
+  final int bomProjectId;
+  final String designator;
+  final String comment;
+  final String footprint;
+
+  /// 嘉立创 Value 列。
+  final String value;
+  final String mpn;
+  final String manufacturer;
+  final String lcscCode;
+  final String supplier;
+  final double? unitPrice;
+  final double quantity;
+
+  /// v1.0 预留：手工绑定的物料。
+  final int? materialId;
+  final int sort;
+
+  final String? matchStatus;
+  final int? matchedMaterialId;
+  final bool checked;
+
+  BomItem copyWith({
+    int? id,
+    String? matchStatus,
+    int? matchedMaterialId,
+    bool clearMatched = false,
+    bool? checked,
+    int? sort,
+  }) {
+    return BomItem(
+      id: id ?? this.id,
+      bomProjectId: bomProjectId,
+      designator: designator,
+      comment: comment,
+      footprint: footprint,
+      value: value,
+      mpn: mpn,
+      manufacturer: manufacturer,
+      lcscCode: lcscCode,
+      supplier: supplier,
+      unitPrice: unitPrice,
+      quantity: quantity,
+      materialId: materialId,
+      sort: sort ?? this.sort,
+      matchStatus: matchStatus ?? this.matchStatus,
+      matchedMaterialId: clearMatched
+          ? null
+          : (matchedMaterialId ?? this.matchedMaterialId),
+      checked: checked ?? this.checked,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    if (id != null) 'id': id,
+    'bom_project_id': bomProjectId,
+    'designator': designator,
+    'comment': comment,
+    'footprint': footprint,
+    'value': value,
+    'mpn': mpn,
+    'manufacturer': manufacturer,
+    'lcsc_code': lcscCode,
+    'supplier': supplier,
+    'unit_price': unitPrice,
+    'quantity': quantity,
+    'material_id': materialId,
+    'sort': sort,
+    'match_status': matchStatus,
+    'matched_material_id': matchedMaterialId,
+    'checked': checked ? 1 : 0,
+  };
+
+  factory BomItem.fromMap(Map<String, Object?> map) => BomItem(
+    id: map['id'] as int?,
+    bomProjectId: ((map['bom_project_id'] ?? 0) as num).toInt(),
+    designator: (map['designator'] ?? '') as String,
+    comment: (map['comment'] ?? '') as String,
+    footprint: (map['footprint'] ?? '') as String,
+    value: (map['value'] ?? '') as String,
+    mpn: (map['mpn'] ?? '') as String,
+    manufacturer: (map['manufacturer'] ?? '') as String,
+    lcscCode: (map['lcsc_code'] ?? '') as String,
+    supplier: (map['supplier'] ?? '') as String,
+    unitPrice: (map['unit_price'] as num?)?.toDouble(),
+    quantity: ((map['quantity'] ?? 0) as num).toDouble(),
+    materialId: map['material_id'] as int?,
+    sort: ((map['sort'] ?? 0) as num).toInt(),
+    matchStatus: map['match_status'] as String?,
+    matchedMaterialId: map['matched_material_id'] as int?,
+    checked: ((map['checked'] ?? 0) as num) == 1,
+  );
+}
+
 /// 流水类型。
 class TxType {
   static const inbound = 'in';

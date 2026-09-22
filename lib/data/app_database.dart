@@ -14,7 +14,20 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static const String dbFileName = 'partbox.db';
-  static const int schemaVersion = 1;
+
+  /// v2：`bom_items` 增补嘉立创原始列 + F10 比对字段（match_status / matched_material_id / checked）。
+  static const int schemaVersion = 2;
+
+  /// v1 → v2 需要补进 `bom_items` 的列。
+  static const Map<String, String> _bomItemColumnsV2 = {
+    'manufacturer': 'TEXT',
+    'value': 'TEXT',
+    'supplier': 'TEXT',
+    'unit_price': 'REAL',
+    'match_status': 'TEXT',
+    'matched_material_id': 'INTEGER',
+    'checked': 'INTEGER NOT NULL DEFAULT 0',
+  };
 
   Database? _db;
 
@@ -47,7 +60,30 @@ class AppDatabase {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await _addMissingColumns(db, 'bom_items', _bomItemColumnsV2);
+    }
+  }
+
+  /// 补列（幂等）：先看 PRAGMA table_info，缺哪列补哪列，重复升级也不会报错。
+  Future<void> _addMissingColumns(
+    Database db,
+    String table,
+    Map<String, String> columns,
+  ) async {
+    final info = await db.rawQuery('PRAGMA table_info($table)');
+    final existing = info.map((row) => row['name'] as String).toSet();
+    for (final entry in columns.entries) {
+      if (existing.contains(entry.key)) continue;
+      await db.execute(
+        'ALTER TABLE $table ADD COLUMN ${entry.key} ${entry.value}',
+      );
+    }
   }
 
   Future<void> close() async {
@@ -138,6 +174,7 @@ class AppDatabase {
       )
     ''');
 
+    // F10 BOM 对照：bom_items 保留嘉立创原始列，另存比对结果。
     batch.execute('''
       CREATE TABLE bom_items(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,7 +189,14 @@ class AppDatabase {
         pos_x REAL,
         pos_y REAL,
         side TEXT,
-        sort INTEGER NOT NULL DEFAULT 0
+        sort INTEGER NOT NULL DEFAULT 0,
+        manufacturer TEXT,
+        value TEXT,
+        supplier TEXT,
+        unit_price REAL,
+        match_status TEXT,
+        matched_material_id INTEGER,
+        checked INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
