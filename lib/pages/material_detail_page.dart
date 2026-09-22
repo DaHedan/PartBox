@@ -260,13 +260,14 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () async {
-                          final changed = await Navigator.of(context).push<bool>(
+                          // 编辑页保存后 pop 回物料 id
+                          final savedId = await Navigator.of(context).push<int>(
                             MaterialPageRoute(
                               builder: (_) =>
                                   MaterialEditPage(materialId: item.id),
                             ),
                           );
-                          if (changed == true) _reload();
+                          if (savedId != null) _reload();
                         },
                         child: const Text('修改'),
                       ),
