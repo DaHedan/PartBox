@@ -30,11 +30,12 @@ class InboundPage extends StatefulWidget {
 }
 
 class _InboundPageState extends State<InboundPage> {
-  final TextEditingController _qty = TextEditingController();
   final TextEditingController _note = TextEditingController();
 
   late final Future<List<Location>> _locationsFuture = LocationRepository.all();
-  final List<MaterialItem> _targets = [];
+
+  /// 入库清单（物料 + 本包数量）。
+  final List<_InboundEntry> _entries = [];
   int? _locationId;
 
   /// 本次清单是否由扫码加入（用于确认后自动回到扫码页，扫下一包）。
@@ -49,17 +50,17 @@ class _InboundPageState extends State<InboundPage> {
 
   @override
   void dispose() {
-    _qty.dispose();
     _note.dispose();
     super.dispose();
   }
 
-  void _addTarget(MaterialItem item) {
-    if (_targets.any((e) => e.id == item.id)) {
+  /// 加入清单；[qty] 为扫码标签带出的本包数量（加到该条目的采购量）。
+  void _addTarget(MaterialItem item, {double qty = 0}) {
+    if (_entries.any((e) => e.item.id == item.id)) {
       showToast(context, '「${item.title}」已在本次入库清单中');
       return;
     }
-    setState(() => _targets.add(item));
+    setState(() => _entries.add(_InboundEntry(item, qty: qty)));
   }
 
   Future<void> _pickLocation() async {
@@ -87,7 +88,11 @@ class _InboundPageState extends State<InboundPage> {
   /// 按 C 编号加入清单（可选：标签带出的 MPN 作为预填）。
   ///
   /// 返回是否成功加入清单。
-  Future<bool> _addByCode(String rawCode, {String? presetMpn}) async {
+  Future<bool> _addByCode(
+    String rawCode, {
+    String? presetMpn,
+    double qty = 0,
+  }) async {
     final code = LcscService.normalizeCode(rawCode) ?? rawCode.trim();
     if (code.isEmpty) return false;
     final appState = context.read<AppState>();
@@ -110,11 +115,11 @@ class _InboundPageState extends State<InboundPage> {
       );
       if (!mounted || choice == null) return false;
       if (choice == DuplicateEntryChoice.merge) {
-        _addTarget(existing);
+        _addTarget(existing, qty: qty);
         showToast(context, '已并入已有条目「${existing.title}」');
         return true;
       }
-      return _createDuplicate(existing, presetMpn: presetMpn);
+      return _createDuplicate(existing, presetMpn: presetMpn, qty: qty);
     }
     showToast(context, '正在查询 $code …');
     final result = await LcscService.query(code, apiKey: appState.lcscApiKey);
@@ -141,7 +146,7 @@ class _InboundPageState extends State<InboundPage> {
     if (createdId == null) return false;
     final created = await MaterialRepository.byId(createdId);
     if (!mounted || created == null) return false;
-    _addTarget(created);
+    _addTarget(created, qty: qty);
     if (result.part == null) {
       showToast(context, '查询失败已转手动录入：${result.error ?? ''}');
     }
@@ -149,10 +154,11 @@ class _InboundPageState extends State<InboundPage> {
   }
 
   /// 复制已有元件的信息，新建一条独立条目（多包分开记），数量从 0 起算，
-  /// 本包数量由「入库数量」在确认时加上。
+  /// 本包数量（[qty]）在确认入库时加到该条目的采购量上。
   Future<bool> _createDuplicate(
     MaterialItem source, {
     String? presetMpn,
+    double qty = 0,
   }) async {
     final now = DateTime.now();
     final newId = await MaterialRepository.insert(
@@ -176,8 +182,8 @@ class _InboundPageState extends State<InboundPage> {
     if (!mounted) return false;
     final created = await MaterialRepository.byId(newId);
     if (!mounted || created == null) return false;
-    _addTarget(created);
-    showToast(context, '已新建条目「${created.title}」，数量按入库数量累加');
+    _addTarget(created, qty: qty);
+    showToast(context, '已新建条目「${created.title}」');
     return true;
   }
 
@@ -196,15 +202,13 @@ class _InboundPageState extends State<InboundPage> {
       if (!mounted) return;
       final code = hit.code;
       if (code == null) continue;
-      final added = await _addByCode(code, presetMpn: hit.mpn);
+      final added = await _addByCode(
+        code,
+        presetMpn: hit.mpn,
+        qty: hit.qty ?? 0,
+      );
       if (!mounted) return;
-      if (!added) continue;
-      _fromScan = true;
-      // qty → 预填入库数量（用户可改，确认时以输入框为准）
-      final qty = hit.qty;
-      if (qty != null) {
-        setState(() => _qty.text = formatQty(qty));
-      }
+      if (added) _fromScan = true;
     }
   }
 
@@ -246,19 +250,19 @@ class _InboundPageState extends State<InboundPage> {
   }
 
   Future<void> _submit() async {
-    if (_targets.isEmpty) {
+    if (_entries.isEmpty) {
       showToast(context, '请先选择要入库的物料');
       return;
     }
     final locationId = _locationId ?? kUnassignedLocationId;
     final note = _note.text.trim();
-    final qty = double.tryParse(_qty.text.trim()) ?? 0;
     final fromScan = _fromScan;
-    for (final target in _targets) {
+    final bagQty = _entries.fold<double>(0, (sum, e) => sum + e.qty);
+    for (final entry in _entries) {
       await StockService.inbound(
-        materialId: target.id!,
+        materialId: entry.item.id!,
         locationId: locationId,
-        qty: qty,
+        qty: entry.qty,
         note: note.isEmpty ? null : note,
       );
     }
@@ -269,14 +273,13 @@ class _InboundPageState extends State<InboundPage> {
     context.read<AppState>().notifyDataChanged();
     showToast(
       context,
-      qty > 0
-          ? '已入库 ${_targets.length} 种 × ${formatQty(qty)}（$locationName）'
-          : '已入库 ${_targets.length} 种（$locationName）',
+      bagQty > 0
+          ? '已入库 ${_entries.length} 种（采购量 +${formatQty(bagQty)}，$locationName）'
+          : '已入库 ${_entries.length} 种（$locationName）',
     );
     setState(() {
-      _targets.clear();
+      _entries.clear();
       _note.clear();
-      _qty.clear();
       _fromScan = false;
     });
     // 连续入库：扫码进来的，确认后直接回到扫码页，扫下一包
@@ -392,7 +395,7 @@ class _InboundPageState extends State<InboundPage> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    if (_targets.isEmpty)
+                    if (_entries.isEmpty)
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(20),
@@ -408,54 +411,55 @@ class _InboundPageState extends State<InboundPage> {
                         ),
                       )
                     else
-                      for (final item in _targets) ...[
+                      for (final entry in _entries) ...[
                         MaterialCard(
-                          item: item,
-                          lowStock: context.read<AppState>().isLowStock(item),
-                          iconKey: item.categoryIcon,
+                          item: entry.item,
+                          lowStock: context
+                              .read<AppState>()
+                              .isLowStock(entry.item),
+                          iconKey: entry.item.categoryIcon,
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
-                              builder: (_) =>
-                                  MaterialDetailPage(materialId: item.id!),
-                            ),
-                          ),
-                          trailing: IconButton(
-                            icon: Icon(
-                              Icons.close,
-                              size: 18,
-                              color: palette.textSub,
-                            ),
-                            tooltip: '移出清单',
-                            onPressed: () => setState(
-                              () => _targets.removeWhere(
-                                (e) => e.id == item.id,
+                              builder: (_) => MaterialDetailPage(
+                                materialId: entry.item.id!,
                               ),
                             ),
+                          ),
+                          trailing: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (entry.qty != 0)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: Text(
+                                    '本包 +${formatQty(entry.qty)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: palette.success,
+                                    ),
+                                  ),
+                                ),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.close,
+                                  size: 18,
+                                  color: palette.textSub,
+                                ),
+                                tooltip: '移出清单',
+                                onPressed: () => setState(
+                                  () => _entries.removeWhere(
+                                    (e) => e.item.id == entry.item.id,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(height: 10),
                       ],
                     const SizedBox(height: 12),
-                    _SectionTitle(title: '3 入库数量'),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _qty,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: '入库数量',
-                        hintText: '留空 = 只归档，不改数量',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '扫立创包装二维码会自动带入本包数量（可改）；'
-                      '入库时 采购量 +n、余量 +n。',
-                      style: TextStyle(fontSize: 12, color: palette.textSub),
-                    ),
-                    const SizedBox(height: 20),
-                    _SectionTitle(title: '4 备注（可选）'),
+                    _SectionTitle(title: '3 备注（可选）'),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _note,
@@ -463,6 +467,12 @@ class _InboundPageState extends State<InboundPage> {
                         labelText: '备注',
                         hintText: '如：到货拆包',
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '扫立创包装二维码会把本包数量加到该条目的采购量（余量随之同步）；'
+                      '非扫码入场则不改数量，只归档到所选仓库。',
+                      style: TextStyle(fontSize: 12, color: palette.textSub),
                     ),
                     const SizedBox(height: 32),
                   ],
@@ -476,7 +486,7 @@ class _InboundPageState extends State<InboundPage> {
               onPressed: _submit,
               icon: const Icon(Icons.check),
               label: Text(
-                _targets.isEmpty ? '确认入库' : '确认入库（${_targets.length} 种）',
+                _entries.isEmpty ? '确认入库' : '确认入库（${_entries.length} 种）',
               ),
             ),
           ),
@@ -487,6 +497,14 @@ class _InboundPageState extends State<InboundPage> {
 }
 
 bool get _supportsScanner => Platform.isAndroid || Platform.isIOS;
+
+/// 入库清单条目：物料 + 本包数量（扫码标签 qty，0 = 只归档不改数量）。
+class _InboundEntry {
+  _InboundEntry(this.item, {this.qty = 0});
+
+  final MaterialItem item;
+  final double qty;
+}
 
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle({required this.title});
