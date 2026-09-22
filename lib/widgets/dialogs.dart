@@ -223,6 +223,47 @@ Future<bool> showConfirmDialog(
   return result ?? false;
 }
 
+/// 入库命中库中已有元件时的选择。
+enum DuplicateEntryChoice {
+  /// 新建一条独立条目（多包分开记）
+  createNew,
+
+  /// 并入已有条目（数量累加）
+  merge,
+}
+
+/// 入库时命中库中已有 C 编号：新建条目 / 并入已有 / 取消。
+Future<DuplicateEntryChoice?> showDuplicateEntryDialog(
+  BuildContext context, {
+  required String message,
+}) {
+  final palette = context.palette;
+  return showDialog<DuplicateEntryChoice>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('库中已有该元件'),
+      content: Text(message, style: const TextStyle(fontSize: 14)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text('取消', style: TextStyle(color: palette.textSub)),
+        ),
+        TextButton(
+          onPressed: () =>
+              Navigator.of(context).pop(DuplicateEntryChoice.merge),
+          child: const Text('并入已有'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(80, 40)),
+          onPressed: () =>
+              Navigator.of(context).pop(DuplicateEntryChoice.createNew),
+          child: const Text('新建条目'),
+        ),
+      ],
+    ),
+  );
+}
+
 /// 底部单选列表。
 Future<T?> showPickerSheet<T>(
   BuildContext context, {

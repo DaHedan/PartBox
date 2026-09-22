@@ -94,9 +94,27 @@ class _InboundPageState extends State<InboundPage> {
     final existing = await MaterialRepository.byLcscCode(code);
     if (!mounted) return false;
     if (existing != null) {
-      _addTarget(existing);
-      showToast(context, '库中已有 $code，直接加入入库清单');
-      return true;
+      // 同一元件可能买多包、甚至分放不同仓库 → 默认建议新建一条独立条目
+      final sameCode = await MaterialRepository.allByLcscCode(code);
+      if (!mounted) return false;
+      final total = sameCode.fold<double>(
+        0,
+        (sum, item) => sum + item.qtyRemaining,
+      );
+      final choice = await showDuplicateEntryDialog(
+        context,
+        message:
+            '$code 库中已有 ${sameCode.length} 条记录'
+            '（余量合计 ${formatQty(total)}）。\n'
+            '同一元件买多包、或分放不同仓库时，建议新建一条单独记录。',
+      );
+      if (!mounted || choice == null) return false;
+      if (choice == DuplicateEntryChoice.merge) {
+        _addTarget(existing);
+        showToast(context, '已并入已有条目「${existing.title}」');
+        return true;
+      }
+      return _createDuplicate(existing, presetMpn: presetMpn);
     }
     showToast(context, '正在查询 $code …');
     final result = await LcscService.query(code, apiKey: appState.lcscApiKey);
@@ -127,6 +145,39 @@ class _InboundPageState extends State<InboundPage> {
     if (result.part == null) {
       showToast(context, '查询失败已转手动录入：${result.error ?? ''}');
     }
+    return true;
+  }
+
+  /// 复制已有元件的信息，新建一条独立条目（多包分开记），数量从 0 起算，
+  /// 本包数量由「入库数量」在确认时加上。
+  Future<bool> _createDuplicate(
+    MaterialItem source, {
+    String? presetMpn,
+  }) async {
+    final now = DateTime.now();
+    final newId = await MaterialRepository.insert(
+      MaterialItem(
+        name: source.name,
+        mpn: (presetMpn != null && presetMpn.isNotEmpty)
+            ? presetMpn
+            : source.mpn,
+        lcscCode: source.lcscCode,
+        categoryId: source.categoryId,
+        package: source.package,
+        brand: source.brand,
+        params: source.params,
+        imagePath: source.imagePath,
+        unit: source.unit,
+        locationId: _locationId,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+    if (!mounted) return false;
+    final created = await MaterialRepository.byId(newId);
+    if (!mounted || created == null) return false;
+    _addTarget(created);
+    showToast(context, '已新建条目「${created.title}」，数量按入库数量累加');
     return true;
   }
 

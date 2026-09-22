@@ -77,6 +77,10 @@ class MaterialRepository {
     return MaterialItem.fromMap(rows.first);
   }
 
+  /// 同一 C 编号的全部记录（同一元件买多包、分开记时为多条）。
+  static Future<List<MaterialItem>> allByLcscCode(String code) =>
+      _query(where: 'm.lcsc_code = ?', args: [code.trim().toUpperCase()]);
+
   static Future<int> insert(MaterialItem item) async {
     final map = item.toMap()..remove('id');
     return _db.insert('materials', map);
