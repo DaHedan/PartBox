@@ -36,8 +36,31 @@ class _LocationDetailPageState extends State<LocationDetailPage>
   late Future<_LocationDetailData> _future = _load();
   int _revision = -1;
 
-  /// 当前仓库内的物料 id（供全选/批量删除使用）。
-  List<int> _visibleIds = const [];
+  /// 可批量删除的物料 id（进入多选/全选时刷新）。
+  List<int> _selectableIds = const [];
+
+  Future<List<int>> _querySelectableIds() async {
+    final materials = await MaterialRepository.byLocation(widget.locationId);
+    return [for (final item in materials) item.id!];
+  }
+
+  Future<void> _startSelection() async {
+    final ids = await _querySelectableIds();
+    if (!mounted) return;
+    if (ids.isEmpty) {
+      showToast(context, '本仓库还没有物料');
+      return;
+    }
+    _selectableIds = ids;
+    enterSelection();
+  }
+
+  Future<void> _selectAll() async {
+    final ids = await _querySelectableIds();
+    if (!mounted) return;
+    _selectableIds = ids;
+    setSelection(selectedIds.length == ids.length ? const <int>[] : ids);
+  }
 
   Future<void> _deleteSelected() async {
     final ids = selectedIds.toList();
@@ -92,13 +115,9 @@ class _LocationDetailPageState extends State<LocationDetailPage>
       appBar: selecting
           ? SelectionAppBar(
               count: selectedIds.length,
-              allSelected: _visibleIds.isNotEmpty &&
-                  selectedIds.length == _visibleIds.length,
-              onSelectAll: () => setSelection(
-                selectedIds.length == _visibleIds.length
-                    ? const <int>[]
-                    : _visibleIds,
-              ),
+              allSelected: _selectableIds.isNotEmpty &&
+                  selectedIds.length == _selectableIds.length,
+              onSelectAll: _selectAll,
               onDelete: _deleteSelected,
               onExit: exitSelection,
             )
@@ -108,9 +127,7 @@ class _LocationDetailPageState extends State<LocationDetailPage>
                 IconButton(
                   icon: const Icon(Icons.checklist),
                   tooltip: '批量删除',
-                  onPressed: _visibleIds.isEmpty
-                      ? null
-                      : () => enterSelection(),
+                  onPressed: _startSelection,
                 ),
               ],
             ),
@@ -123,7 +140,6 @@ class _LocationDetailPageState extends State<LocationDetailPage>
           }
           final location = data.location;
           final materials = data.materials;
-          _visibleIds = [for (final item in materials) item.id!];
           return Column(
             children: [
               Expanded(

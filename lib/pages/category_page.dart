@@ -29,8 +29,34 @@ class _CategoryPageState extends State<CategoryPage>
   late Future<List<Category>> _future = CategoryRepository.topCategories();
   int _revision = -1;
 
-  /// 可批量删除的大类 id（内置分类不可删，故不进"全选"范围）。
-  List<int> _visibleIds = const [];
+  /// 可批量删除的大类 id（进入多选/全选时刷新；内置分类不可删）。
+  List<int> _selectableIds = const [];
+
+  Future<List<int>> _querySelectableIds() async {
+    final categories = await CategoryRepository.topCategories();
+    return [
+      for (final category in categories)
+        if (!category.builtin) category.id!,
+    ];
+  }
+
+  Future<void> _startSelection() async {
+    final ids = await _querySelectableIds();
+    if (!mounted) return;
+    if (ids.isEmpty) {
+      showToast(context, '内置分类不可删除，没有可批量删除的分类');
+      return;
+    }
+    _selectableIds = ids;
+    enterSelection();
+  }
+
+  Future<void> _selectAll() async {
+    final ids = await _querySelectableIds();
+    if (!mounted) return;
+    _selectableIds = ids;
+    setSelection(selectedIds.length == ids.length ? const <int>[] : ids);
+  }
 
   Future<void> _deleteSelected() async {
     final ids = selectedIds.toList();
@@ -190,13 +216,9 @@ class _CategoryPageState extends State<CategoryPage>
       appBar: selecting
           ? SelectionAppBar(
               count: selectedIds.length,
-              allSelected: _visibleIds.isNotEmpty &&
-                  selectedIds.length == _visibleIds.length,
-              onSelectAll: () => setSelection(
-                selectedIds.length == _visibleIds.length
-                    ? const <int>[]
-                    : _visibleIds,
-              ),
+              allSelected: _selectableIds.isNotEmpty &&
+                  selectedIds.length == _selectableIds.length,
+              onSelectAll: _selectAll,
               onDelete: _deleteSelected,
               onExit: exitSelection,
             )
@@ -207,9 +229,7 @@ class _CategoryPageState extends State<CategoryPage>
                 IconButton(
                   icon: const Icon(Icons.checklist),
                   tooltip: '批量删除',
-                  onPressed: _visibleIds.isEmpty
-                      ? null
-                      : () => enterSelection(),
+                  onPressed: _startSelection,
                 ),
                 IconButton(
                   icon: const Icon(Icons.search),
@@ -228,11 +248,6 @@ class _CategoryPageState extends State<CategoryPage>
               future: _future,
               builder: (context, snapshot) {
                 final categories = snapshot.data ?? const <Category>[];
-                // 内置分类不可删，也不算进"全选"
-                _visibleIds = [
-                  for (final category in categories)
-                    if (!category.builtin) category.id!,
-                ];
                 if (categories.isEmpty) {
                   return const EmptyState(
                     icon: Icons.grid_view_outlined,

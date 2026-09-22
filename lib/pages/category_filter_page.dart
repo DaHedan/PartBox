@@ -65,8 +65,8 @@ class _CategoryFilterPageState extends State<CategoryFilterPage>
   bool _unassignedOnly = false;
   _SortMode _sort = _SortMode.updated;
 
-  /// 当前结果集里的物料 id（供全选/批量删除使用）。
-  List<int> _visibleIds = const [];
+  /// 当前结果集里可批量删除的物料 id（进入多选/全选时刷新）。
+  List<int> _selectableIds = const [];
 
   Future<_FilterData> _load() async {
     final materials = await MaterialRepository.byTopCategory(
@@ -312,6 +312,32 @@ class _CategoryFilterPageState extends State<CategoryFilterPage>
     showToast(context, '已删除 ${ids.length} 种物料');
   }
 
+  /// 当前筛选结果里的物料 id（点击时实时计算，避免用到过期缓存）。
+  Future<List<int>> _querySelectableIds() async {
+    final appState = context.read<AppState>();
+    final data = await _future;
+    final filtered = _applyFilters(data.materials, appState);
+    return [for (final item in filtered) item.id!];
+  }
+
+  Future<void> _startSelection() async {
+    final ids = await _querySelectableIds();
+    if (!mounted) return;
+    if (ids.isEmpty) {
+      showToast(context, '当前没有可批量删除的物料');
+      return;
+    }
+    _selectableIds = ids;
+    enterSelection();
+  }
+
+  Future<void> _selectAll() async {
+    final ids = await _querySelectableIds();
+    if (!mounted) return;
+    _selectableIds = ids;
+    setSelection(selectedIds.length == ids.length ? const <int>[] : ids);
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
@@ -325,13 +351,9 @@ class _CategoryFilterPageState extends State<CategoryFilterPage>
       appBar: selecting
           ? SelectionAppBar(
               count: selectedIds.length,
-              allSelected: _visibleIds.isNotEmpty &&
-                  selectedIds.length == _visibleIds.length,
-              onSelectAll: () => setSelection(
-                selectedIds.length == _visibleIds.length
-                    ? const <int>[]
-                    : _visibleIds,
-              ),
+              allSelected: _selectableIds.isNotEmpty &&
+                  selectedIds.length == _selectableIds.length,
+              onSelectAll: _selectAll,
               onDelete: _deleteSelected,
               onExit: exitSelection,
             )
@@ -351,9 +373,7 @@ class _CategoryFilterPageState extends State<CategoryFilterPage>
                 IconButton(
                   icon: const Icon(Icons.checklist),
                   tooltip: '批量删除',
-                  onPressed: _visibleIds.isEmpty
-                      ? null
-                      : () => enterSelection(),
+                  onPressed: _startSelection,
                 ),
                 IconButton(
                   icon: const Icon(Icons.search),
@@ -376,7 +396,6 @@ class _CategoryFilterPageState extends State<CategoryFilterPage>
           _sortItems(filtered);
           final groups = _buildGroups(data, appState, filtered);
           final chips = _chips(groups);
-          _visibleIds = [for (final item in filtered) item.id!];
 
           return Column(
             children: [
