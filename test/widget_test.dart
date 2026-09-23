@@ -13,6 +13,7 @@ import 'package:partbox/data/repositories/bom_repository.dart';
 import 'package:partbox/data/repositories/material_repository.dart';
 import 'package:partbox/data/repositories/transaction_repository.dart';
 import 'package:partbox/data/stock_service.dart';
+import 'package:partbox/theme/app_theme.dart';
 import 'package:partbox/utils/format.dart';
 import 'package:partbox/utils/scan_payload.dart';
 import 'package:partbox/widgets/facet_filter.dart';
@@ -75,6 +76,35 @@ void main() {
       expect(isBatchTraceCode('C237147158'), isFalse);
       expect(isBatchTraceCode('{pc:C518789}'), isFalse);
     });
+  });
+
+  test('主题显式指定字体族：Windows 中文不再回退到宋体', () {
+    final theme = AppTheme.dark();
+    final body = theme.textTheme.bodyMedium;
+    if (Platform.isAndroid || Platform.isIOS) {
+      // 移动端按 UI 规范保持系统默认字体
+      expect(body?.fontFamily, isNull);
+      expect(body?.fontFamilyFallback, isNull);
+    } else {
+      // 正文从默认 textTheme 继承
+      expect(body?.fontFamily, 'Segoe UI');
+      expect(body?.fontFamilyFallback, contains('Microsoft YaHei UI'));
+      // 组件主题里手写的 TextStyle 不会继承 ThemeData 的字体设置，必须逐个带上
+      for (final style in [
+        theme.appBarTheme.titleTextStyle,
+        theme.listTileTheme.titleTextStyle,
+        theme.inputDecorationTheme.hintStyle,
+        theme.dialogTheme.titleTextStyle,
+        theme.dialogTheme.contentTextStyle,
+        theme.snackBarTheme.contentTextStyle,
+        theme.chipTheme.labelStyle,
+        theme.filledButtonTheme.style?.textStyle?.resolve({}),
+        theme.outlinedButtonTheme.style?.textStyle?.resolve({}),
+      ]) {
+        expect(style?.fontFamily, 'Segoe UI');
+        expect(style?.fontFamilyFallback, contains('Microsoft YaHei UI'));
+      }
+    }
   });
 
   test('筛选参数值排序：数值+单位按数值，其余按字典序', () {

@@ -1,5 +1,32 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+
+/// 桌面端（Windows/macOS/Linux）显式指定字体族。
+///
+/// 不指定时 Flutter 完全交给引擎自动回退：Windows 上中文会落到**宋体**（衬线），
+/// 和 UI 规范第 3 节要求的「Windows Segoe UI 系」不符。这里写明
+/// 西文 Segoe UI + 中文微软雅黑，两端表现才一致、也不会随系统/引擎变化而漂。
+/// Android / iOS 保持系统默认字体，不加干预。
+final bool _isDesktop = !Platform.isAndroid && !Platform.isIOS;
+
+final String? _desktopFontFamily = _isDesktop ? 'Segoe UI' : null;
+
+final List<String>? _desktopFontFallback = _isDesktop
+    ? const ['Microsoft YaHei UI', 'Microsoft YaHei']
+    : null;
+
+/// 组件主题里手写的 TextStyle **不会**继承 `ThemeData.fontFamilyFallback`
+/// （只有默认 textTheme 会被打上），所以统一用这个工厂包一层。
+TextStyle _style({double? fontSize, FontWeight? fontWeight, Color? color}) =>
+    TextStyle(
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      fontFamily: _desktopFontFamily,
+      fontFamilyFallback: _desktopFontFallback,
+    );
 
 /// 工程风色板（对应《UI 设计规范 v2.0》第 2 节）。
 class AppPalette {
@@ -127,6 +154,8 @@ class AppTheme {
       colorScheme: scheme,
       scaffoldBackgroundColor: p.bg,
       canvasColor: p.bg,
+      fontFamily: _desktopFontFamily,
+      fontFamilyFallback: _desktopFontFallback,
       splashFactory: InkRipple.splashFactory,
       appBarTheme: AppBarTheme(
         backgroundColor: p.bg,
@@ -136,7 +165,7 @@ class AppTheme {
         scrolledUnderElevation: 0,
         centerTitle: true,
         iconTheme: IconThemeData(color: p.text, size: 24),
-        titleTextStyle: TextStyle(
+        titleTextStyle: _style(
           fontSize: 20,
           fontWeight: FontWeight.w600,
           color: p.text,
@@ -166,7 +195,7 @@ class AppTheme {
       listTileTheme: ListTileThemeData(
         iconColor: p.textSub,
         textColor: p.text,
-        titleTextStyle: TextStyle(
+        titleTextStyle: _style(
           fontSize: 16,
           fontWeight: FontWeight.w500,
           color: p.text,
@@ -177,8 +206,8 @@ class AppTheme {
         fillColor: p.isDark ? const Color(0xFF16213A) : Colors.white,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        hintStyle: TextStyle(color: p.textSub, fontSize: 14),
-        labelStyle: TextStyle(color: p.textSub, fontSize: 14),
+        hintStyle: _style(color: p.textSub, fontSize: 14),
+        labelStyle: _style(color: p.textSub, fontSize: 14),
         border: OutlineInputBorder(
           borderRadius: radiusField,
           borderSide: BorderSide(color: p.border),
@@ -196,7 +225,7 @@ class AppTheme {
         backgroundColor: p.isDark ? p.bg : const Color(0xFFF1F5F9),
         selectedColor: p.primary.withValues(alpha: 0.16),
         side: BorderSide(color: p.border),
-        labelStyle: TextStyle(fontSize: 13, color: p.text),
+        labelStyle: _style(fontSize: 13, color: p.text),
         shape: const StadiumBorder(),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       ),
@@ -205,7 +234,7 @@ class AppTheme {
           backgroundColor: p.primary,
           foregroundColor: Colors.white,
           minimumSize: const Size.fromHeight(52),
-          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          textStyle: _style(fontSize: 16, fontWeight: FontWeight.w600),
           shape: RoundedRectangleBorder(borderRadius: radiusField),
         ),
       ),
@@ -214,7 +243,7 @@ class AppTheme {
           foregroundColor: p.text,
           minimumSize: const Size.fromHeight(48),
           side: BorderSide(color: p.border),
-          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          textStyle: _style(fontSize: 15, fontWeight: FontWeight.w600),
           shape: RoundedRectangleBorder(borderRadius: radiusField),
         ),
       ),
@@ -224,19 +253,19 @@ class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: p.isDark ? const Color(0xFF263449) : const Color(0xFF1E293B),
-        contentTextStyle: const TextStyle(color: Colors.white, fontSize: 14),
+        contentTextStyle: _style(color: Colors.white, fontSize: 14),
         shape: RoundedRectangleBorder(borderRadius: radiusField),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: p.card,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: radiusCard),
-        titleTextStyle: TextStyle(
+        titleTextStyle: _style(
           fontSize: 18,
           fontWeight: FontWeight.w600,
           color: p.text,
         ),
-        contentTextStyle: TextStyle(fontSize: 14, color: p.text),
+        contentTextStyle: _style(fontSize: 14, color: p.text),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: p.card,
