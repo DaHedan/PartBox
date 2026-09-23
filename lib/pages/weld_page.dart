@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../data/models.dart';
@@ -56,7 +57,24 @@ class _WeldPageState extends State<WeldPage> {
   @override
   void initState() {
     super.initState();
+    _lockLandscape();
     _load();
+  }
+
+  /// 手机端 iBOM 是「左清单右板图」的桌面布局，竖屏太挤，进页面直接转横屏。
+  /// 电脑端没有重力感应，不用管。
+  Future<void> _lockLandscape() async {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+    await SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+
+  /// 退出时放开限制，恢复跟随系统。
+  Future<void> _restoreOrientation() async {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+    await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
   }
 
   Future<void> _load() async {
@@ -467,6 +485,7 @@ class _WeldPageState extends State<WeldPage> {
 
   @override
   void dispose() {
+    _restoreOrientation();
     _controller?.dispose();
     super.dispose();
   }
