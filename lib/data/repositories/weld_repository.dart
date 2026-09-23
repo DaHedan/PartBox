@@ -157,7 +157,7 @@ class WeldRepository {
   /// 清空某工程的「已焊接」勾选。
   ///
   /// 只取消勾选，不动消耗/损耗计数，更不回滚库存流水 ——
-  /// 流水是真实出入库动作（PRD 11.7），要退走物料详情页的撤销。
+  /// 流水是真实出入库动作（PRD 11.7），要退走物料详情页改「消耗量」。
   static Future<void> clearWelded(int projectId) async {
     await _db.update(
       'weld_progress',

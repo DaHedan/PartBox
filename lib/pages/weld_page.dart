@@ -350,13 +350,13 @@ class _WeldPageState extends State<WeldPage> {
 
   /// 清空已焊接（要确认）。
   ///
-  /// 只取消勾选：库存流水是真实出入库动作，不随勾选撤销（PRD 11.7）。
+  /// 只取消勾选：库存流水是真实出入库动作，不随勾选一起回滚（PRD 11.7）。
   Future<void> _clearWelded() async {
     final sure = await showConfirmDialog(
       context,
       title: '清空已焊接',
       message: '将取消本工程全部已焊接勾选，从头开始焊。\n'
-          '已产生的库存流水不会回滚；真要退料，去物料详情页用流水撤销。',
+          '已产生的库存流水不会回滚；要退料，去物料详情页改「消耗量」。',
       confirmText: '清空',
       danger: true,
     );

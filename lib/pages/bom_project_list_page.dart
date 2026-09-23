@@ -17,6 +17,7 @@ import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/multi_select.dart';
 import 'bom_compare_page.dart';
 
 /// F10 BOM 工程列表：历史导入可重复打开（入口见首页「BOM 对照」大卡）。
@@ -31,9 +32,13 @@ class BomProjectListPage extends StatefulWidget {
 /// 拖拽导入只在电脑端可用（移动端没有系统级文件拖拽）。
 bool get _supportsDrop => !Platform.isAndroid && !Platform.isIOS;
 
-class _BomProjectListPageState extends State<BomProjectListPage> {
+class _BomProjectListPageState extends State<BomProjectListPage>
+    with MultiSelectMixin<BomProjectListPage> {
   late Future<List<BomProject>> _future = BomRepository.projects();
   bool _importing = false;
+
+  /// 可批量删除的条目（BOM 工程）。
+  List<int> _selectableIds = const [];
 
   /// 拖入文件时高亮整个页面。
   bool _dragging = false;
@@ -62,7 +67,26 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
   Widget build(BuildContext context) {
     final palette = context.palette;
     return Scaffold(
-      appBar: AppBar(title: const Text('BOM 对照')),
+      appBar: selecting
+          ? SelectionAppBar(
+              count: selectedIds.length,
+              allSelected:
+                  _selectableIds.isNotEmpty &&
+                  selectedIds.length == _selectableIds.length,
+              onSelectAll: _selectAll,
+              onDelete: _deleteSelected,
+              onExit: exitSelection,
+            )
+          : AppBar(
+              title: const Text('BOM 对照'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.checklist),
+                  tooltip: '批量删除',
+                  onPressed: _startSelection,
+                ),
+              ],
+            ),
       body: DropTarget(
         enable: _supportsDrop && _dropEnabled,
         onDragEntered: (_) => setState(() => _dragging = true),
@@ -171,11 +195,17 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
 
   Widget _projectCard(BuildContext context, BomProject project) {
     final palette = context.palette;
+    final projectId = project.id!;
     return Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => _openProject(project.id!),
-        onSecondaryTap: () => _delete(project),
+        onTap: selecting
+            ? () => toggleSelected(projectId)
+            : () => _openProject(projectId),
+        onLongPress: selecting ? null : () => enterSelection(projectId),
+        onSecondaryTap: selecting || !useSecondaryTapSelection
+            ? null
+            : () => enterSelection(projectId),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
           child: Row(
@@ -202,20 +232,75 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
                   ],
                 ),
               ),
-              PopupMenuButton<String>(
-                icon: Icon(Icons.more_vert, size: 20, color: palette.textSub),
-                onSelected: (value) {
-                  if (value == 'delete') _delete(project);
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: 'delete', child: Text('删除')),
-                ],
-              ),
+              if (selecting)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: SelectCheck(checked: selectedIds.contains(projectId)),
+                )
+              else
+                PopupMenuButton<String>(
+                  icon: Icon(Icons.more_vert, size: 20, color: palette.textSub),
+                  tooltip: '更多',
+                  onSelected: (value) {
+                    if (value == 'delete') _delete(project);
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 'delete', child: Text('删除')),
+                  ],
+                ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  // ---------- 批量删除 ----------
+
+  Future<List<int>> _querySelectableIds() async {
+    final projects = await _future;
+    return [
+      for (final project in projects)
+        if (project.id != null) project.id!,
+    ];
+  }
+
+  Future<void> _startSelection() async {
+    final ids = await _querySelectableIds();
+    if (!mounted) return;
+    if (ids.isEmpty) {
+      showToast(context, '还没有可删除的 BOM 工程');
+      return;
+    }
+    _selectableIds = ids;
+    enterSelection();
+  }
+
+  Future<void> _selectAll() async {
+    final ids = await _querySelectableIds();
+    if (!mounted) return;
+    _selectableIds = ids;
+    setSelection(selectedIds.length == ids.length ? const <int>[] : ids);
+  }
+
+  Future<void> _deleteSelected() async {
+    final ids = selectedIds.toList();
+    if (ids.isEmpty) return;
+    final ok = await showConfirmDialog(
+      context,
+      title: '批量删除 BOM 工程',
+      message: '将删除选中的 ${ids.length} 个 BOM 工程及其全部比对结果。',
+      confirmText: '删除',
+      danger: true,
+    );
+    if (!ok) return;
+    for (final id in ids) {
+      await BomRepository.deleteProject(id);
+    }
+    if (!mounted) return;
+    exitSelection();
+    _reload();
+    showToast(context, '已删除 ${ids.length} 个 BOM 工程');
   }
 
   Future<void> _delete(BomProject project) async {
