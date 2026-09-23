@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 8.0+ 自适应图标：背景为渐变（见 drawable/ic_launcher_background.xml），
+     前景为 logo 本体（居中占 66/108，圆角外透明）。
+     低版本走 mipmap-*/ic_launcher.png 的传统图标。 -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

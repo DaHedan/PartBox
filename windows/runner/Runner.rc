@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.partbox" "\0"
-            VALUE "FileDescription", "partbox" "\0"
+            VALUE "FileDescription", "元件盒" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "partbox" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.partbox. All rights reserved." "\0"
             VALUE "OriginalFilename", "partbox.exe" "\0"
-            VALUE "ProductName", "partbox" "\0"
+            VALUE "ProductName", "元件盒" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

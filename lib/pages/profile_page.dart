@@ -157,12 +157,12 @@ class ProfilePage extends StatelessWidget {
           Card(
             child: _SettingRow(
               icon: Icons.info_outline,
-              title: 'PartBox 元件盒',
+              title: '元件盒',
               value: 'v1.0',
               onTap: () => showDialog<void>(
                 context: context,
                 builder: (context) => AlertDialog(
-                  title: const Text('PartBox 元件盒'),
+                  title: const Text('元件盒'),
                   content: const Text(
                     '版本 v1.0\n\n电子元器件库存管理工具：立创分类体系、'
                     'C 编号/扫码建档、三量库存与流水、分面筛选、本地备份。\n'

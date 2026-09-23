@@ -12,7 +12,7 @@ class PartBoxApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
     return MaterialApp(
-      title: 'PartBox 元件盒',
+      title: '元件盒',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),

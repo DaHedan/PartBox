@@ -50,7 +50,7 @@ class BackupService {
       throw const FormatException('备份文件格式不正确（不是 JSON 对象）');
     }
     if (decoded['formatVersion'] == null) {
-      throw const FormatException('缺少 formatVersion 字段，可能不是 PartBox 备份文件');
+      throw const FormatException('缺少 formatVersion 字段，可能不是元件盒备份文件');
     }
 
     final counts = <String, int>{};

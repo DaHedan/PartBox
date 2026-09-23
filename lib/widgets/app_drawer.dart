@@ -91,16 +91,12 @@ class AppDrawer extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'PartBox',
+                          '元件盒',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
                             color: palette.text,
                           ),
-                        ),
-                        Text(
-                          '元件盒',
-                          style: TextStyle(fontSize: 12, color: palette.textSub),
                         ),
                       ],
                     ),

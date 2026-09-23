@@ -27,7 +27,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"partbox", origin, size)) {
+  // 标题栏文字：元件盒。项目已在 APPLY_STANDARD_SETTINGS 里加了 /utf-8，
+  // 可以直接写中文；否则 MSVC 按系统 ANSI 代码页解读会乱码并触发 C4819。
+  if (!window.Create(L"元件盒", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
