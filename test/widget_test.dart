@@ -169,19 +169,43 @@ void main() {
       expect(parseResistanceOhm('1M'), 1000000);
     });
 
-    test('封装去前缀字母：C0603/R0603 → 0603', () {
+    test('电感值统一到 H，电流统一到 A，频率统一到 Hz', () {
+      expect(parseInductanceH('4.7uH'), closeTo(4.7e-6, 1e-12));
+      expect(parseInductanceH('120nH'), closeTo(1.2e-7, 1e-12));
+      expect(parseInductanceH('10mH'), closeTo(1e-2, 1e-9));
+      expect(parseCurrentA('1.5A'), 1.5);
+      expect(parseCurrentA('500mA'), 0.5);
+      expect(parseCurrentA('100uA'), closeTo(1e-4, 1e-12));
+      expect(parseFrequencyHz('16MHz'), 16000000);
+      expect(parseFrequencyHz('32.768kHz'), 32768);
+      expect(parseFrequencyHz('2.4GHz'), 2400000000);
+      // 单位不能串台
+      expect(parseInductanceH('100nF'), isNull);
+      expect(parseCurrentA('120Ω'), isNull);
+      expect(parseFrequencyHz('4.7uH'), isNull);
+    });
+
+    test('封装归一化：去前缀字母 + 去尺寸后缀', () {
       expect(normalizePackage('C0603'), '0603');
       expect(normalizePackage('r0402'), '0402');
       expect(normalizePackage('0603'), '0603');
-      expect(normalizePackage('SOD-523_L1.2-W0.8'), 'SOD-523_L1.2-W0.8');
+      // 嘉立创 Footprint 带尺寸后缀，只留主封装名
+      expect(normalizePackage('SOD-123_L2.7-W1.6-LS3.7-RD'), 'SOD-123');
+      expect(normalizePackage('SOD-523_L1.2-W0.8-LS1.6-BI'), 'SOD-523');
+      expect(normalizePackage('SOT-23-3_L3.0-W1.7-P0.95-LS2.9-BR'), 'SOT-23-3');
     });
 
-    test('从 Comment 里挑出耐压 / 功率', () {
+    test('从 Comment 里挑出耐压 / 功率 / 电流 / 频率', () {
       expect(extractVoltageV('100nF 50V'), 50);
       expect(extractVoltageV('4.7uF/16V'), 16);
       expect(extractVoltageV('100nF'), isNull);
       expect(extractPowerW('10kΩ 0.1W'), 0.1);
       expect(extractPowerW('10kΩ'), isNull);
+      expect(extractCurrentA('2.2uH 1.5A'), 1.5);
+      // 磁珠的阻抗与测试频率不能互相当成电感/电流
+      expect(extractImpedanceOhm('120Ω@100MHz'), 120);
+      expect(extractInductanceH('120Ω@100MHz'), isNull);
+      expect(extractCurrentA('120Ω@100MHz'), isNull);
     });
   });
 
@@ -191,6 +215,7 @@ void main() {
       String? code,
       String? brand,
       String? package,
+      String? category,
       List<ParamEntry> params = const [],
       double remaining = 100,
     }) => MaterialItem(
@@ -200,6 +225,7 @@ void main() {
       lcscCode: code,
       brand: brand,
       package: package,
+      categoryName: category,
       params: params,
       qtyRemaining: remaining,
       createdAt: DateTime(2026),
@@ -345,7 +371,7 @@ void main() {
       expect(MatchStatus.defaultChecked(result.status), isTrue);
     });
 
-    test('非 RLC 只判蓝 / 红（参数一致也不算绿黄）', () {
+    test('无模板的类型只判蓝 / 红（IC 即使参数碰巧一致也不给绿黄）', () {
       final result = BomMatcher.match(
         const ParsedBomRow(
           designator: 'U1',
@@ -356,6 +382,144 @@ void main() {
         [material(package: 'WIRELM-SMD_ESP32-S3-WROOM-1')],
       );
       expect(result.status, MatchStatus.red);
+    });
+
+    test('二极管：反向耐压 + 封装一致，正向电流达标即绿', () {
+      final result = BomMatcher.match(
+        const ParsedBomRow(
+          designator: 'D4, D5',
+          comment: '1N5819HW-7-F',
+          footprint: 'SOD-123_L2.7-W1.6-LS3.7-RD',
+          quantity: 4,
+        ),
+        [
+          material(
+            package: 'SOD-123',
+            params: const [
+              ParamEntry('反向耐压', '40V'),
+              ParamEntry('正向电流(If)', '3A'),
+            ],
+          ),
+        ],
+        bomParams: const [
+          ParamEntry('反向耐压', '40V'),
+          ParamEntry('正向电流', '1A'),
+        ],
+      );
+      expect(result.status, MatchStatus.green);
+      expect(result.reason, '反向耐压 + 封装一致，正向电流达标');
+    });
+
+    test('二极管：只有核心参数一致 → 黄，并说明缺哪一侧', () {
+      final result = BomMatcher.match(
+        const ParsedBomRow(
+          designator: 'D1',
+          comment: 'LESD5D5.0CT1G',
+          footprint: 'SOD-523_L1.2-W0.8-LS1.6-BI',
+          quantity: 3,
+        ),
+        [
+          material(
+            package: 'SOD-523',
+            params: const [ParamEntry('反向耐压', '5V')],
+          ),
+        ],
+        bomParams: const [
+          ParamEntry('反向耐压', '5V'),
+          ParamEntry('正向电流', '1A'),
+        ],
+      );
+      expect(result.status, MatchStatus.yellow);
+      expect(result.reason, '核心参数一致 · 库中料未记正向电流');
+    });
+
+    test('电感：电感值 + 封装一致，额定电流达标即绿', () {
+      final result = BomMatcher.match(
+        const ParsedBomRow(
+          designator: 'L2',
+          comment: 'CBW160808U121T',
+          footprint: 'L0603',
+          quantity: 1,
+        ),
+        [
+          material(
+            package: '0603',
+            params: const [
+              ParamEntry('电感值', '4.7uH'),
+              ParamEntry('额定电流', '2A'),
+            ],
+          ),
+        ],
+        bomParams: const [
+          ParamEntry('电感值', '4.7uH'),
+          ParamEntry('额定电流', '1.5A'),
+        ],
+      );
+      expect(result.status, MatchStatus.green);
+    });
+
+    test('磁珠：按阻抗@100MHz 判核心参数，频率不会被当成电感/电流', () {
+      final result = BomMatcher.match(
+        const ParsedBomRow(
+          designator: 'FB1',
+          comment: '120Ω@100MHz',
+          footprint: '0603',
+          quantity: 2,
+        ),
+        [
+          material(
+            package: '0603',
+            params: const [
+              ParamEntry('阻抗@100MHz', '120Ω'),
+              ParamEntry('额定电流', '500mA'),
+            ],
+          ),
+        ],
+      );
+      expect(result.status, MatchStatus.yellow);
+      expect(result.reason, '核心参数一致 · BOM 未标额定电流');
+    });
+
+    test('模板优先级：库中料按子类名判类型，优先于 BOM 位号', () {
+      final result = BomMatcher.match(
+        const ParsedBomRow(
+          designator: 'C1',
+          comment: '4.7uH',
+          footprint: 'C0603',
+          quantity: 1,
+        ),
+        [
+          material(
+            category: '贴片电感',
+            package: '0603',
+            params: const [
+              ParamEntry('电感值', '4.7uH'),
+              ParamEntry('额定电流', '2A'),
+            ],
+          ),
+        ],
+        bomParams: const [
+          ParamEntry('电感值', '4.7uH'),
+          ParamEntry('额定电流', '1.5A'),
+        ],
+      );
+      expect(result.status, MatchStatus.green);
+    });
+
+    test('模板判定：子类名关键词覆盖 PRD 表里的类型', () {
+      expect(BomMatcher.templateFromCategory('贴片电容(MLCC)')?.label, '电容');
+      expect(BomMatcher.templateFromCategory('贴片电阻')?.label, '电阻');
+      expect(BomMatcher.templateFromCategory('功率电感')?.label, '电感');
+      expect(BomMatcher.templateFromCategory('贴片磁珠')?.label, '磁珠');
+      expect(BomMatcher.templateFromCategory('肖特基二极管')?.label, '二极管');
+      expect(BomMatcher.templateFromCategory('稳压二极管')?.label, '稳压二极管');
+      expect(BomMatcher.templateFromCategory('TVS/ESD')?.label, 'TVS/ESD');
+      expect(BomMatcher.templateFromCategory('无源晶振')?.label, '晶振');
+      expect(BomMatcher.templateFromCategory('自恢复保险丝')?.label, '保险丝');
+      // 无模板 → 只判蓝/红
+      expect(BomMatcher.templateFromCategory('MCU'), isNull);
+      expect(BomMatcher.templateFromCategory('板对板连接器'), isNull);
+      expect(BomMatcher.templateFromCategory('未分类'), isNull);
     });
 
     test('多候选：按余量降序，取第一个', () {
@@ -496,17 +660,31 @@ void main() {
           footprint: 'R0603',
           lcscCode: 'C222222',
         ),
-        // 非 RLC 只判蓝/红，不必查
+        // 无模板（IC/连接器…）只判蓝/红，不必查
         ParsedBomRow(
           designator: 'U1',
           comment: 'CH340N',
           footprint: 'SOP-8',
           lcscCode: 'C2977777',
         ),
+        // 二极管：Comment 是 MPN，核心/重要参数都取不到 → 要查
+        ParsedBomRow(
+          designator: 'D4',
+          comment: '1N5819HW-7-F',
+          footprint: 'SOD-123_L2.7-W1.6-LS3.7-RD',
+          lcscCode: 'C82544',
+        ),
+        // 磁珠：Comment 里已有阻抗，但缺额定电流 → 要查
+        ParsedBomRow(
+          designator: 'FB1',
+          comment: '120Ω@100MHz',
+          footprint: '0603',
+          lcscCode: 'C333333',
+        ),
         // 没 C 编号，查不了
         ParsedBomRow(designator: 'C3', comment: '1uF', footprint: 'C0603'),
       ]);
-      expect(codes, {'C6119867', 'C2906982'});
+      expect(codes, {'C6119867', 'C2906982', 'C82544', 'C333333'});
     });
   });
 
