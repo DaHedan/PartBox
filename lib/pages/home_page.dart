@@ -61,7 +61,6 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     _BigCard(
                       title: 'BOM 对照',
-                      subtitle: '导入嘉立创 BOM，四色比对库存后双导出',
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => const BomProjectListPage(),
@@ -71,7 +70,6 @@ class _HomePageState extends State<HomePage> {
                     const SizedBox(height: 12),
                     _BigCard(
                       title: '焊接辅助',
-                      subtitle: 'iBOM 左清单右板图，边焊边扣',
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => const WeldProjectListPage(),
@@ -150,13 +148,6 @@ class _HomePageState extends State<HomePage> {
                                               ),
                                             ),
                                           ),
-                                          Text(
-                                            '${location.materialKinds} 种',
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: palette.textSub,
-                                            ),
-                                          ),
                                           const SizedBox(width: 8),
                                           CountCircle(
                                             count: location.materialKinds,
@@ -193,14 +184,9 @@ class _HomePageState extends State<HomePage> {
 
 /// 首页大功能卡（UI 规范 6.4）。
 class _BigCard extends StatelessWidget {
-  const _BigCard({
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
+  const _BigCard({required this.title, required this.onTap});
 
   final String title;
-  final String subtitle;
   final VoidCallback onTap;
 
   @override
@@ -211,30 +197,16 @@ class _BigCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: SizedBox(
-          height: 124,
-          child: Stack(
-            children: [
-              Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: palette.text,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      subtitle,
-                      style: TextStyle(fontSize: 12, color: palette.textSub),
-                    ),
-                  ],
-                ),
+          height: 80,
+          child: Center(
+            child: Text(
+              title,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: palette.text,
               ),
-            ],
+            ),
           ),
         ),
       ),
