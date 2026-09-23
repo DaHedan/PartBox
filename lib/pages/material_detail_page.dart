@@ -3,8 +3,10 @@ import 'package:provider/provider.dart';
 
 import '../data/models.dart';
 import '../data/repositories/category_repository.dart';
+import '../data/repositories/location_repository.dart';
 import '../data/repositories/material_repository.dart';
 import '../data/repositories/transaction_repository.dart';
+import '../data/seed_data.dart';
 import '../data/stock_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -104,6 +106,40 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
       context,
       '余量 −${formatQty(value)}（剩 ${formatQty(updated?.qtyRemaining ?? 0)}）',
     );
+  }
+
+  /// 改变储存位置：只改 materials.location_id，不算一次出入库。
+  Future<void> _changeLocation(MaterialItem item) async {
+    final locations = await LocationRepository.all();
+    if (!mounted) return;
+    if (locations.isEmpty) {
+      showToast(context, '还没有仓库，先去仓库页建一个');
+      return;
+    }
+    final currentId = item.locationId ?? kUnassignedLocationId;
+    Location? current;
+    for (final location in locations) {
+      if (location.id == currentId) {
+        current = location;
+        break;
+      }
+    }
+
+    final picked = await showPickerSheet<Location>(
+      context,
+      title: '改变储存位置',
+      options: locations,
+      labelOf: (location) => location.name,
+      selected: current,
+      emptyHint: '还没有仓库',
+    );
+    if (picked == null || picked.id == currentId) return;
+
+    await MaterialRepository.update(item.copyWith(locationId: picked.id));
+    if (!mounted) return;
+    context.read<AppState>().notifyDataChanged();
+    _reload();
+    showToast(context, '储存位置 → ${picked.name}');
   }
 
   Future<void> _delete(MaterialItem item) async {
@@ -251,6 +287,17 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
                             ),
                     ),
                   ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _changeLocation(item),
+                    icon: const Icon(Icons.swap_horiz, size: 18),
+                    label: const Text('改变储存位置'),
+                  ),
                 ),
               ),
               Padding(
