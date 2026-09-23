@@ -4,12 +4,15 @@ import 'dart:typed_data';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../data/bom/bom_enrich.dart';
 import '../data/bom/bom_matcher.dart';
 import '../data/bom/bom_parser.dart';
 import '../data/models.dart';
 import '../data/repositories/bom_repository.dart';
 import '../data/repositories/material_repository.dart';
+import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/empty_state.dart';
@@ -38,7 +41,15 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
   /// 比对页在前台时关闭拖拽目标：DropTarget 在不可见时仍会收到事件。
   bool _dropEnabled = true;
 
+  /// 立创参数补全进度（0 = 未在查）。
+  int _lookupDone = 0;
+  int _lookupTotal = 0;
+
   static const List<String> _allowedExtensions = ['xlsx', 'csv'];
+
+  String get _busyLabel => _lookupTotal > 0
+      ? '查询立创参数 $_lookupDone/$_lookupTotal'
+      : '正在解析…';
 
   void _reload() {
     // 注意：回调里不能直接返回 Future，否则 setState 断言失败、界面不刷新。
@@ -98,7 +109,7 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.file_upload_outlined),
-                    label: Text(_importing ? '正在解析…' : '导入 BOM'),
+                    label: Text(_importing ? _busyLabel : '导入 BOM'),
                   ),
                 ),
                 Padding(
@@ -233,9 +244,9 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
     if (!mounted) return;
 
     setState(() => _importing = true);
-    int? projectId;
+    _ImportOutcome? outcome;
     try {
-      projectId = await _importBytes(bytes, file.name, file.extension);
+      outcome = await _importBytes(bytes, file.name, file.extension);
     } catch (e) {
       if (mounted) showToast(context, '导入失败：$e');
     } finally {
@@ -243,7 +254,9 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
     }
     if (!mounted) return;
     _reload();
-    if (projectId != null) await _openProject(projectId);
+    if (outcome == null) return;
+    _warnLookupMisses(outcome);
+    await _openProject(outcome.projectId);
   }
 
   /// 电脑端拖入文件：支持一次拖多个，一个文件生成一个工程。
@@ -260,17 +273,17 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
     }
 
     setState(() => _importing = true);
-    final imported = <int>[];
+    final imported = <_ImportOutcome>[];
     try {
       for (final file in files) {
         final bytes = await file.readAsBytes();
         if (!mounted) return;
-        final id = await _importBytes(
+        final outcome = await _importBytes(
           bytes,
           file.name,
           _extensionOf(file.name),
         );
-        if (id != null) imported.add(id);
+        if (outcome != null) imported.add(outcome);
       }
     } catch (e) {
       if (mounted) showToast(context, '导入失败：$e');
@@ -280,15 +293,28 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
     if (!mounted) return;
 
     _reload();
+    if (imported.isEmpty) return;
+    for (final outcome in imported) {
+      _warnLookupMisses(outcome);
+    }
     if (imported.length == 1) {
-      await _openProject(imported.single);
-    } else if (imported.isNotEmpty) {
+      await _openProject(imported.single.projectId);
+    } else {
       showToast(context, '已导入 ${imported.length} 个 BOM 工程');
     }
   }
 
-  /// 解析 + 建工程。返回工程 id，失败（格式不识别 / 未完成映射）返回 null。
-  Future<int?> _importBytes(
+  /// 有 C 编号没查到参数时提示：这些行只能按 Comment 判定，容易偏保守。
+  void _warnLookupMisses(_ImportOutcome outcome) {
+    if (outcome.lookupMisses <= 0) return;
+    showToast(
+      context,
+      '有 ${outcome.lookupMisses} 个 C 编号没查到参数（离线？），这些行只按 Comment 判定',
+    );
+  }
+
+  /// 解析 + 建工程。返回结果，失败（格式不识别 / 未完成映射）返回 null。
+  Future<_ImportOutcome?> _importBytes(
     Uint8List bytes,
     String fileName,
     String? extension,
@@ -356,8 +382,35 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
   }
 
   /// 建工程 → 逐行四色比对 → 落库（比对结果持久化，默认勾选黄 + 红）。
-  Future<int> _createProject(ParsedBom parsed, String fileName) async {
+  ///
+  /// 比对前先按 BOM 里的 C 编号查回原料参数：嘉立创 BOM 的 Comment 常只写
+  /// `4.7uF`，缺耐压就判不了绿，全都会掉成黄。查不到的行退化为只按 Comment 判。
+  Future<_ImportOutcome> _createProject(
+    ParsedBom parsed,
+    String fileName,
+  ) async {
+    final apiKey = context.read<AppState>().lcscApiKey;
     final materials = await MaterialRepository.all();
+
+    final codes = BomEnricher.codesNeedingParams(parsed.rows);
+    var enriched = const <String, List<ParamEntry>>{};
+    if (codes.isNotEmpty) {
+      if (mounted) setState(() => _lookupTotal = codes.length);
+      enriched = await BomEnricher.fetchParams(
+        codes,
+        apiKey: apiKey,
+        onProgress: (done, _) {
+          if (mounted) setState(() => _lookupDone = done);
+        },
+      );
+      if (mounted) {
+        setState(() {
+          _lookupTotal = 0;
+          _lookupDone = 0;
+        });
+      }
+    }
+
     final now = DateTime.now();
     final projectId = await BomRepository.insertProject(
       BomProject(
@@ -372,12 +425,14 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
     final items = <BomItem>[];
     for (var i = 0; i < parsed.rows.length; i++) {
       final row = parsed.rows[i];
-      final result = BomMatcher.match(row, materials);
+      final params = enriched[row.lcscCode.trim().toUpperCase()] ?? const [];
+      final result = BomMatcher.match(row, materials, bomParams: params);
       final matched = result.candidates.isEmpty
           ? null
-          : result.candidates.first;
+          : result.candidates.first.material;
       items.add(
         row.toItem(projectId, i).copyWith(
+          params: params,
           matchStatus: result.status,
           matchedMaterialId: matched?.id,
           clearMatched: matched == null,
@@ -386,8 +441,16 @@ class _BomProjectListPageState extends State<BomProjectListPage> {
       );
     }
     await BomRepository.insertItems(items);
-    return projectId;
+    return _ImportOutcome(projectId, codes.length - enriched.length);
   }
+}
+
+/// 一次导入的结果：工程 id + 多少个 C 编号没查到参数。
+class _ImportOutcome {
+  const _ImportOutcome(this.projectId, this.lookupMisses);
+
+  final int projectId;
+  final int lookupMisses;
 }
 
 /// CSV 手动列映射对话框（保底）。

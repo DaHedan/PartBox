@@ -25,7 +25,9 @@ class _BomComparePageState extends State<BomComparePage> {
   BomProject? _project;
   List<BomItem> _items = const [];
   Map<int, MaterialItem> _materials = const {};
-  Map<int, List<MaterialItem>> _candidates = const {};
+
+  /// 每行的同色候选（含该候选的判定说明）。
+  Map<int, List<BomMatchCandidate>> _candidates = const {};
   final Set<int> _expanded = {};
   bool _loading = true;
   bool _exporting = false;
@@ -46,17 +48,23 @@ class _BomComparePageState extends State<BomComparePage> {
     };
 
     // 打开即重算（库变了也能纠正），但保留用户已选定的匹配对象。
-    final candidates = <int, List<MaterialItem>>{};
+    final candidates = <int, List<BomMatchCandidate>>{};
     final refreshed = <BomItem>[];
     final changed = <BomItem>[];
     for (final item in items) {
-      final result = BomMatcher.match(_rowOf(item), materials);
-      var chosen = result.candidates.isEmpty ? null : result.candidates.first;
+      final result = BomMatcher.match(
+        _rowOf(item),
+        materials,
+        bomParams: item.params,
+      );
+      var chosen = result.candidates.isEmpty
+          ? null
+          : result.candidates.first.material;
       final persistedId = item.matchedMaterialId;
       if (persistedId != null) {
         for (final candidate in result.candidates) {
-          if (candidate.id == persistedId) {
-            chosen = candidate;
+          if (candidate.material.id == persistedId) {
+            chosen = candidate.material;
             break;
           }
         }
@@ -260,8 +268,9 @@ class _BomComparePageState extends State<BomComparePage> {
     final matched = item.matchedMaterialId == null
         ? null
         : _materials[item.matchedMaterialId!];
-    final candidates = _candidates[item.id] ?? const <MaterialItem>[];
+    final candidates = _candidates[item.id] ?? const <BomMatchCandidate>[];
     final expanded = _expanded.contains(item.id);
+    final reason = _reasonOf(item, candidates);
 
     return Card(
       child: Column(
@@ -351,6 +360,17 @@ class _BomComparePageState extends State<BomComparePage> {
                               style: TextStyle(fontSize: 12, color: color),
                             ),
                           ],
+                          if (reason != null &&
+                              status != MatchStatus.red) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              '依据：$reason',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: palette.textSub,
+                              ),
+                            ),
+                          ],
                           if (status == MatchStatus.blue && matched != null) ...[
                             const SizedBox(height: 2),
                             Text(
@@ -410,9 +430,20 @@ class _BomComparePageState extends State<BomComparePage> {
     );
   }
 
+  /// 当前选中候选的判定说明（为什么是这个颜色）。
+  String? _reasonOf(BomItem item, List<BomMatchCandidate> candidates) {
+    if (candidates.isEmpty) return null;
+    for (final candidate in candidates) {
+      if (candidate.material.id == item.matchedMaterialId) {
+        return candidate.reason;
+      }
+    }
+    return candidates.first.reason;
+  }
+
   Widget _candidateList(
     BomItem item,
-    List<MaterialItem> candidates,
+    List<BomMatchCandidate> candidates,
     AppPalette palette,
   ) {
     return Column(
@@ -428,17 +459,17 @@ class _BomComparePageState extends State<BomComparePage> {
         ),
         for (final candidate in candidates)
           InkWell(
-            onTap: () => _choose(item, candidate),
+            onTap: () => _choose(item, candidate.material),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
                   Icon(
-                    candidate.id == item.matchedMaterialId
+                    candidate.material.id == item.matchedMaterialId
                         ? Icons.radio_button_checked
                         : Icons.radio_button_unchecked,
                     size: 18,
-                    color: candidate.id == item.matchedMaterialId
+                    color: candidate.material.id == item.matchedMaterialId
                         ? palette.primary
                         : palette.textSub,
                   ),
@@ -448,13 +479,20 @@ class _BomComparePageState extends State<BomComparePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          candidate.title,
+                          candidate.material.title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: 13, color: palette.text),
                         ),
                         Text(
-                          '${candidate.lcscCode ?? "—"} · ${candidate.locationName ?? "未分配"} · 余量 ${formatQty(candidate.qtyRemaining)}',
+                          '${candidate.material.lcscCode ?? "—"} · ${candidate.material.locationName ?? "未分配"} · 余量 ${formatQty(candidate.material.qtyRemaining)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: palette.textSub,
+                          ),
+                        ),
+                        Text(
+                          candidate.reason,
                           style: TextStyle(
                             fontSize: 11,
                             color: palette.textSub,

@@ -16,17 +16,21 @@ class AppDatabase {
   static const String dbFileName = 'partbox.db';
 
   /// v2：`bom_items` 增补嘉立创原始列 + F10 比对字段（match_status / matched_material_id / checked）。
-  static const int schemaVersion = 2;
+  /// v3：`bom_items` 增补 params_json（按 C 编号查回的原料参数，用于补齐耐压/功率）。
+  static const int schemaVersion = 3;
 
-  /// v1 → v2 需要补进 `bom_items` 的列。
-  static const Map<String, String> _bomItemColumnsV2 = {
-    'manufacturer': 'TEXT',
-    'value': 'TEXT',
-    'supplier': 'TEXT',
-    'unit_price': 'REAL',
-    'match_status': 'TEXT',
-    'matched_material_id': 'INTEGER',
-    'checked': 'INTEGER NOT NULL DEFAULT 0',
+  /// `bom_items` 的历次补列（键为引入该列的 schemaVersion，按序幂等执行）。
+  static const Map<int, Map<String, String>> _bomItemColumnUpgrades = {
+    2: {
+      'manufacturer': 'TEXT',
+      'value': 'TEXT',
+      'supplier': 'TEXT',
+      'unit_price': 'REAL',
+      'match_status': 'TEXT',
+      'matched_material_id': 'INTEGER',
+      'checked': 'INTEGER NOT NULL DEFAULT 0',
+    },
+    3: {'params_json': 'TEXT'},
   };
 
   Database? _db;
@@ -65,8 +69,10 @@ class AppDatabase {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      await _addMissingColumns(db, 'bom_items', _bomItemColumnsV2);
+    for (final entry in _bomItemColumnUpgrades.entries) {
+      if (oldVersion < entry.key) {
+        await _addMissingColumns(db, 'bom_items', entry.value);
+      }
     }
   }
 
@@ -196,7 +202,8 @@ class AppDatabase {
         unit_price REAL,
         match_status TEXT,
         matched_material_id INTEGER,
-        checked INTEGER NOT NULL DEFAULT 0
+        checked INTEGER NOT NULL DEFAULT 0,
+        params_json TEXT
       )
     ''');
 

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:excel/excel.dart' as xls;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:partbox/data/app_database.dart';
+import 'package:partbox/data/bom/bom_enrich.dart';
 import 'package:partbox/data/bom/bom_exporter.dart';
 import 'package:partbox/data/bom/bom_matcher.dart';
 import 'package:partbox/data/bom/bom_parser.dart';
@@ -233,7 +234,7 @@ void main() {
       expect(result.status, MatchStatus.blue);
     });
 
-    test('绿：电容容值 + 封装 + 耐压全一致', () {
+    test('绿：电容容值 + 封装一致且耐压达标', () {
       final result = BomMatcher.match(
         const ParsedBomRow(
           designator: 'C1',
@@ -250,6 +251,58 @@ void main() {
         ],
       );
       expect(result.status, MatchStatus.green);
+      expect(result.reason, '容值 + 封装一致，耐压达标');
+    });
+
+    test('绿：库存耐压高于 BOM 需求也算（50V 替 16V）', () {
+      final result = BomMatcher.match(
+        const ParsedBomRow(
+          designator: 'C12, C24',
+          comment: '100nF',
+          footprint: 'C0603',
+          quantity: 2,
+        ),
+        [
+          material(
+            package: '0603',
+            params: const [
+              ParamEntry('容值', '100nF'),
+              ParamEntry('额定电压', '50V'),
+            ],
+          ),
+        ],
+        bomParams: const [
+          ParamEntry('容值', '100nF'),
+          ParamEntry('额定电压', '16V'),
+        ],
+      );
+      expect(result.status, MatchStatus.green);
+    });
+
+    test('黄：库存耐压低于 BOM 需求', () {
+      final result = BomMatcher.match(
+        const ParsedBomRow(
+          designator: 'C1',
+          comment: '100nF',
+          footprint: 'C0603',
+          quantity: 2,
+        ),
+        [
+          material(
+            package: '0603',
+            params: const [
+              ParamEntry('容值', '100nF'),
+              ParamEntry('额定电压', '16V'),
+            ],
+          ),
+        ],
+        bomParams: const [
+          ParamEntry('容值', '100nF'),
+          ParamEntry('额定电压', '50V'),
+        ],
+      );
+      expect(result.status, MatchStatus.yellow);
+      expect(result.reason, '核心参数一致 · 库存耐压不足');
     });
 
     test('黄：仅核心参数（容值 + 封装）一致', () {
@@ -322,7 +375,138 @@ void main() {
       );
       expect(result.status, MatchStatus.yellow);
       expect(result.candidates.length, 2);
-      expect(result.candidates.first.lcscCode, 'C2');
+      expect(result.candidates.first.material.lcscCode, 'C2');
+    });
+
+    test('绿：耐压由 C 编号查回的立创参数补齐', () {
+      // BOM Comment 只有 4.7uF（没耐压），靠 C6119856 查回的 25V 才判得出绿
+      final result = BomMatcher.match(
+        const ParsedBomRow(
+          designator: 'C13, C14, C20, C22, C28',
+          comment: '4.7uF',
+          footprint: 'C0603',
+          mpn: 'CGA0603X5R475K250JT',
+          manufacturer: 'HRE(芯声)',
+          lcscCode: 'C6119856',
+          quantity: 5,
+        ),
+        [
+          material(
+            code: 'C69335',
+            package: '0603',
+            params: const [
+              ParamEntry('容值', '4.7uF'),
+              ParamEntry('额定电压', '25V'),
+            ],
+          ),
+        ],
+        bomParams: const [
+          ParamEntry('容值', '4.7uF'),
+          ParamEntry('精度', '±10%'),
+          ParamEntry('额定电压', '25V'),
+          ParamEntry('温度系数', 'X5R'),
+        ],
+      );
+      expect(result.status, MatchStatus.green);
+      expect(result.reason, '容值 + 封装一致，耐压达标');
+    });
+
+    test('绿：电阻功率由立创参数补齐', () {
+      final result = BomMatcher.match(
+        const ParsedBomRow(
+          designator: 'R1, R2',
+          comment: '5.1kΩ',
+          footprint: 'R0402',
+          quantity: 2,
+        ),
+        [
+          material(
+            package: '0402',
+            params: const [
+              ParamEntry('阻值', '5.1kΩ'),
+              ParamEntry('功率', '62.5mW'),
+            ],
+          ),
+        ],
+        bomParams: const [
+          ParamEntry('阻值', '5.1kΩ'),
+          ParamEntry('功率', '62.5mW'),
+        ],
+      );
+      expect(result.status, MatchStatus.green);
+    });
+
+    test('黄会说明原因：BOM 未标耐压 / 库中料未记耐压', () {
+      const row = ParsedBomRow(
+        designator: 'C1',
+        comment: '100nF',
+        footprint: 'C0603',
+        quantity: 12,
+      );
+      final noBomVoltage = BomMatcher.match(row, [
+        material(
+          package: '0603',
+          params: const [ParamEntry('容值', '100nF'), ParamEntry('耐压', '50V')],
+        ),
+      ]);
+      expect(noBomVoltage.status, MatchStatus.yellow);
+      expect(noBomVoltage.reason, '核心参数一致 · BOM 未标耐压');
+
+      final noMaterialVoltage = BomMatcher.match(
+        row,
+        [
+          material(
+            package: '0603',
+            params: const [ParamEntry('容值', '100nF')],
+          ),
+        ],
+        bomParams: const [ParamEntry('额定电压', '50V')],
+      );
+      expect(noMaterialVoltage.status, MatchStatus.yellow);
+      expect(noMaterialVoltage.reason, '核心参数一致 · 库中料未记耐压');
+    });
+  });
+
+  group('F10.1 C 编号参数补全', () {
+    test('只挑电容缺耐压 / 电阻缺功率且带 C 编号的行', () {
+      final codes = BomEnricher.codesNeedingParams(const [
+        ParsedBomRow(
+          designator: 'C1',
+          comment: '100nF',
+          footprint: 'C0603',
+          lcscCode: 'C6119867',
+        ),
+        // Comment 里已写耐压，不用查
+        ParsedBomRow(
+          designator: 'C2',
+          comment: '100nF 50V',
+          footprint: 'C0603',
+          lcscCode: 'C111111',
+        ),
+        ParsedBomRow(
+          designator: 'R1',
+          comment: '10kΩ',
+          footprint: 'R0603',
+          lcscCode: 'C2906982',
+        ),
+        // 已写功率，不用查
+        ParsedBomRow(
+          designator: 'R2',
+          comment: '10kΩ 0.1W',
+          footprint: 'R0603',
+          lcscCode: 'C222222',
+        ),
+        // 非 RLC 只判蓝/红，不必查
+        ParsedBomRow(
+          designator: 'U1',
+          comment: 'CH340N',
+          footprint: 'SOP-8',
+          lcscCode: 'C2977777',
+        ),
+        // 没 C 编号，查不了
+        ParsedBomRow(designator: 'C3', comment: '1uF', footprint: 'C0603'),
+      ]);
+      expect(codes, {'C6119867', 'C2906982'});
     });
   });
 
@@ -451,19 +635,28 @@ void main() {
       );
       final columns = info.map((row) => row['name'] as String).toSet();
       expect(
-        columns.containsAll(['match_status', 'matched_material_id', 'checked']),
+        columns.containsAll([
+          'match_status',
+          'matched_material_id',
+          'checked',
+          'params_json',
+        ]),
         isTrue,
         reason: 'bom_items 缺少 F10.5 要求的字段：$columns',
       );
     });
 
-    test('比对结果与勾选可持久化', () async {
+    test('比对结果、勾选、立创参数可持久化', () async {
       await BomRepository.insertItems([
         BomItem(
           bomProjectId: projectId,
           designator: 'C1',
           comment: '100nF',
           quantity: 12,
+          params: const [
+            ParamEntry('容值', '100nF'),
+            ParamEntry('额定电压', '50V'),
+          ],
           matchStatus: MatchStatus.yellow,
           checked: true,
         ),
@@ -472,6 +665,8 @@ void main() {
       expect(items.length, 1);
       expect(items.first.matchStatus, MatchStatus.yellow);
       expect(items.first.checked, isTrue);
+      expect(items.first.params.length, 2);
+      expect(items.first.params.last.v, '50V');
 
       await BomRepository.updateItem(
         items.first.id!,
@@ -483,6 +678,8 @@ void main() {
       expect(items.first.matchStatus, MatchStatus.green);
       expect(items.first.matchedMaterialId, 42);
       expect(items.first.checked, isFalse);
+      // 参数不因更新比对结果而丢失
+      expect(items.first.params.length, 2);
 
       final projects = await BomRepository.projects();
       expect(projects.single.itemCount, 1);

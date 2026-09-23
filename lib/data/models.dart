@@ -410,6 +410,7 @@ class BomItem {
     this.quantity = 0,
     this.materialId,
     this.sort = 0,
+    this.params = const [],
     this.matchStatus,
     this.matchedMaterialId,
     this.checked = false,
@@ -434,6 +435,10 @@ class BomItem {
   final int? materialId;
   final int sort;
 
+  /// 按 BOM 里的 C 编号查回的原料参数（容值/额定电压/功率…）。
+  /// Comment 只有 `4.7uF` 这种裸值时，靠它补齐耐压才能判绿。
+  final List<ParamEntry> params;
+
   final String? matchStatus;
   final int? matchedMaterialId;
   final bool checked;
@@ -445,6 +450,7 @@ class BomItem {
     bool clearMatched = false,
     bool? checked,
     int? sort,
+    List<ParamEntry>? params,
   }) {
     return BomItem(
       id: id ?? this.id,
@@ -461,6 +467,7 @@ class BomItem {
       quantity: quantity,
       materialId: materialId,
       sort: sort ?? this.sort,
+      params: params ?? this.params,
       matchStatus: matchStatus ?? this.matchStatus,
       matchedMaterialId: clearMatched
           ? null
@@ -484,6 +491,7 @@ class BomItem {
     'quantity': quantity,
     'material_id': materialId,
     'sort': sort,
+    'params_json': ParamEntry.encode(params),
     'match_status': matchStatus,
     'matched_material_id': matchedMaterialId,
     'checked': checked ? 1 : 0,
@@ -504,6 +512,7 @@ class BomItem {
     quantity: ((map['quantity'] ?? 0) as num).toDouble(),
     materialId: map['material_id'] as int?,
     sort: ((map['sort'] ?? 0) as num).toInt(),
+    params: ParamEntry.decode(map['params_json'] as String?),
     matchStatus: map['match_status'] as String?,
     matchedMaterialId: map['matched_material_id'] as int?,
     checked: ((map['checked'] ?? 0) as num) == 1,

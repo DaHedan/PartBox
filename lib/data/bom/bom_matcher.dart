@@ -9,57 +9,57 @@ class BomMatcher {
   const BomMatcher._();
 
   /// 单行比对：返回四色状态与同色候选（按余量降序）。
-  static BomMatchResult match(ParsedBomRow row, List<MaterialItem> materials) {
+  ///
+  /// [bomParams] 是按 BOM 里的 C 编号查回的原料参数：嘉立创 BOM 的 Comment
+  /// 常只写 `4.7uF`，没有耐压，靠它补齐才能判断"重要参数全一致"。
+  static BomMatchResult match(
+    ParsedBomRow row,
+    List<MaterialItem> materials, {
+    List<ParamEntry> bomParams = const [],
+  }) {
     final kind = kindOf(row.designator);
-    final blue = <MaterialItem>[];
-    final green = <MaterialItem>[];
-    final yellow = <MaterialItem>[];
+    final side = _BomSide(row, bomParams);
+    final blue = <BomMatchCandidate>[];
+    final green = <BomMatchCandidate>[];
+    final yellow = <BomMatchCandidate>[];
 
     for (final material in materials) {
       final blueReason = _blueReason(row, material);
       if (blueReason != null) {
-        blue.add(material);
+        blue.add(BomMatchCandidate(material, blueReason));
         continue;
       }
       if (kind == BomPartKind.other) continue;
-      switch (_paramLevel(row, material, kind)) {
+      final grade = _grade(side, material, kind);
+      if (grade == null) continue;
+      switch (grade.level) {
         case _Level.green:
-          green.add(material);
+          green.add(BomMatchCandidate(material, grade.reason));
         case _Level.yellow:
-          yellow.add(material);
-        case null:
-          break;
+          yellow.add(BomMatchCandidate(material, grade.reason));
       }
     }
 
-    final List<MaterialItem> candidates;
+    final List<BomMatchCandidate> best;
     final String status;
     if (blue.isNotEmpty) {
-      candidates = blue;
+      best = blue;
       status = MatchStatus.blue;
     } else if (green.isNotEmpty) {
-      candidates = green;
+      best = green;
       status = MatchStatus.green;
     } else if (yellow.isNotEmpty) {
-      candidates = yellow;
+      best = yellow;
       status = MatchStatus.yellow;
     } else {
-      candidates = const [];
+      best = const [];
       status = MatchStatus.red;
     }
 
-    final sorted = [...candidates]
-      ..sort((a, b) => b.qtyRemaining.compareTo(a.qtyRemaining));
-    return BomMatchResult(
-      status: status,
-      candidates: sorted,
-      reason: switch (status) {
-        MatchStatus.blue => _blueReason(row, sorted.first) ?? '完全一致',
-        MatchStatus.green => '重要参数一致',
-        MatchStatus.yellow => '核心参数一致',
-        _ => '库中无匹配料',
-      },
-    );
+    final sorted = [...best]
+      ..sort((a, b) =>
+          b.material.qtyRemaining.compareTo(a.material.qtyRemaining));
+    return BomMatchResult(status: status, candidates: sorted);
   }
 
   /// 🔵 蓝：C 编号一致；或 MPN + 制造商一致。
@@ -80,43 +80,60 @@ class BomMatcher {
     return 'MPN + 制造商一致';
   }
 
-  /// 🟢/🟡：仅电容、电阻参与（PRD 10.2）。
-  static _Level? _paramLevel(
-    ParsedBomRow row,
+  /// 🟢/🟡：仅电容、电阻参与（PRD 10.2）；返回 null 表示不匹配。
+  static _Grade? _grade(
+    _BomSide side,
     MaterialItem material,
     BomPartKind kind,
   ) {
-    final bomPackage = normalizePackage(row.footprint);
-    if (bomPackage.isEmpty) return null;
-    if (bomPackage != materialPackage(material)) return null;
+    final package = side.package;
+    if (package.isEmpty || package != materialPackage(material)) return null;
 
     if (kind == BomPartKind.capacitor) {
-      final bomValue = extractCapacitancePf(row.comment) ??
-          extractCapacitancePf(row.value);
+      final bomValue = side.capacitancePf;
       final materialValue = materialCapacitancePf(material);
       if (bomValue == null || materialValue == null) return null;
       if (!_eq(bomValue, materialValue)) return null;
 
-      final bomVoltage =
-          extractVoltageV(row.comment) ?? extractVoltageV(row.value);
-      final materialVoltage = materialVoltageV(material);
-      final voltageMatched = bomVoltage != null &&
-          materialVoltage != null &&
-          _eq(bomVoltage, materialVoltage);
-      return voltageMatched ? _Level.green : _Level.yellow;
+      final bomImportant = side.voltageV;
+      final materialImportant = materialVoltageV(material);
+      if (_sufficient(bomImportant, materialImportant)) {
+        return const _Grade(_Level.green, '容值 + 封装一致，耐压达标');
+      }
+      return _Grade(
+        _Level.yellow,
+        '核心参数一致 · ${_shortReason('耐压', bomImportant, materialImportant)}',
+      );
     }
 
-    final bomValue =
-        extractResistanceOhm(row.comment) ?? extractResistanceOhm(row.value);
+    final bomValue = side.resistanceOhm;
     final materialValue = materialResistanceOhm(material);
     if (bomValue == null || materialValue == null) return null;
     if (!_eq(bomValue, materialValue)) return null;
 
-    final bomPower = extractPowerW(row.comment) ?? extractPowerW(row.value);
-    final materialPower = materialPowerW(material);
-    final powerMatched =
-        bomPower != null && materialPower != null && _eq(bomPower, materialPower);
-    return powerMatched ? _Level.green : _Level.yellow;
+    final bomImportant = side.powerW;
+    final materialImportant = materialPowerW(material);
+    if (_sufficient(bomImportant, materialImportant)) {
+      return const _Grade(_Level.green, '阻值 + 封装一致，功率达标');
+    }
+    return _Grade(
+      _Level.yellow,
+      '核心参数一致 · ${_shortReason('功率', bomImportant, materialImportant)}',
+    );
+  }
+
+  /// 耐压、功率属于「不小于即可」的参数：库存 ≥ BOM 需求就能替代。
+  /// 容值、阻值不适用（必须严格相等，已在上面卡住）。
+  static bool _sufficient(double? bom, double? material) {
+    if (bom == null || material == null) return false;
+    return material > bom || _eq(bom, material);
+  }
+
+  /// 说明为什么没给绿：缺哪一侧，或者库存不够。
+  static String _shortReason(String label, double? bom, double? material) {
+    if (bom == null) return 'BOM 未标$label';
+    if (material == null) return '库中料未记$label';
+    return '库存$label不足';
   }
 
   /// 元件类型：仅识别 C（电容）与 R（电阻），其余按非 RLC 处理（只判蓝/红）。
@@ -140,29 +157,97 @@ enum BomPartKind { capacitor, resistor, other }
 
 enum _Level { green, yellow }
 
+class _Grade {
+  const _Grade(this.level, this.reason);
+
+  final _Level level;
+  final String reason;
+}
+
+/// BOM 侧取值：Comment/Value 文本优先，回落按 C 编号查回的立创参数。
+class _BomSide {
+  const _BomSide(this.row, this.params);
+
+  final ParsedBomRow row;
+  final List<ParamEntry> params;
+
+  static const List<String> _capKeys = ['容值', '电容值', 'capacitance', 'cap'];
+  static const List<String> _resKeys = ['阻值', '电阻值', 'resistance', 'res'];
+  static const List<String> _voltageKeys = [
+    '耐压',
+    '额定电压',
+    '电压',
+    'voltage',
+    'vrating',
+  ];
+  static const List<String> _powerKeys = ['功率', 'power', 'wattage'];
+  static const List<String> _packageKeys = ['封装', 'package', 'footprint'];
+
+  double? get capacitancePf =>
+      extractCapacitancePf(row.comment) ??
+      extractCapacitancePf(row.value) ??
+      extractCapacitancePf(paramValue(params, _capKeys));
+
+  double? get resistanceOhm =>
+      extractResistanceOhm(row.comment) ??
+      extractResistanceOhm(row.value) ??
+      extractResistanceOhm(paramValue(params, _resKeys));
+
+  double? get voltageV {
+    for (final text in [row.comment, row.value, paramValue(params, _voltageKeys)]) {
+      final value = extractVoltageV(text);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  double? get powerW {
+    for (final text in [row.comment, row.value, paramValue(params, _powerKeys)]) {
+      final value = extractPowerW(text);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  String get package {
+    final fromFootprint = normalizePackage(row.footprint);
+    if (fromFootprint.isNotEmpty) return fromFootprint;
+    return normalizePackage(paramValue(params, _packageKeys));
+  }
+}
+
 /// 一行比对结果。
 class BomMatchResult {
-  const BomMatchResult({
-    required this.status,
-    required this.candidates,
-    required this.reason,
-  });
+  const BomMatchResult({required this.status, required this.candidates});
 
   final String status;
-  final List<MaterialItem> candidates;
+
+  /// 同色候选，按余量降序；空表示无匹配（红）。
+  final List<BomMatchCandidate> candidates;
+
+  /// 首个候选的判定说明（用于列表直接展示）。
+  String get reason =>
+      candidates.isEmpty ? '库中无匹配料' : candidates.first.reason;
+}
+
+/// 一个候选匹配料 + 它为什么是这个颜色。
+class BomMatchCandidate {
+  const BomMatchCandidate(this.material, this.reason);
+
+  final MaterialItem material;
   final String reason;
 }
 
 /// 库中料的制造商：优先参数表，回落 brand 字段。
 String materialManufacturerOf(MaterialItem material) {
-  final raw = paramOf(material, ['制造商', '厂家', 'manufacturer', 'mfr']) ??
+  final raw = paramValue(material.params, ['制造商', '厂家', 'manufacturer', 'mfr']) ??
       material.brand;
   return (raw ?? '').trim().toUpperCase();
 }
 
-/// 按参数名取库中料参数值（键名不区分大小写）。
-String? paramOf(MaterialItem material, List<String> keys) {
-  for (final param in material.params) {
+/// 按参数名取参数值（键名不区分大小写）。
+String? paramValue(List<ParamEntry> params, List<String> keys) {
+  for (final param in params) {
     final key = param.k.trim().toLowerCase();
     if (!keys.any((k) => k.toLowerCase() == key)) continue;
     final value = param.v.trim();
@@ -174,30 +259,30 @@ String? paramOf(MaterialItem material, List<String> keys) {
 /// 库中料容值（pF）：参数表优先，回落物料名。
 double? materialCapacitancePf(MaterialItem material) =>
     extractCapacitancePf(
-      paramOf(material, ['容值', '电容值', 'capacitance', 'cap']),
+      paramValue(material.params, ['容值', '电容值', 'capacitance', 'cap']),
     ) ??
     extractCapacitancePf(material.name);
 
 /// 库中料阻值（Ω）：参数表优先，回落物料名。
 double? materialResistanceOhm(MaterialItem material) =>
-    extractResistanceOhm(paramOf(material, ['阻值', '电阻值', 'resistance', 'res'])) ??
+    extractResistanceOhm(
+      paramValue(material.params, ['阻值', '电阻值', 'resistance', 'res']),
+    ) ??
     extractResistanceOhm(material.name);
 
 /// 库中料耐压（V）。
-double? materialVoltageV(MaterialItem material) {
-  final raw = paramOf(material, ['耐压', '额定电压', '电压', 'voltage', 'vrating']);
-  return parseVoltageV(raw) ?? extractVoltageV(raw);
-}
+double? materialVoltageV(MaterialItem material) => extractVoltageV(
+  paramValue(material.params, ['耐压', '额定电压', '电压', 'voltage', 'vrating']),
+);
 
 /// 库中料功率（W）。
-double? materialPowerW(MaterialItem material) {
-  final raw = paramOf(material, ['功率', 'power', 'wattage']);
-  return parsePowerW(raw) ?? extractPowerW(raw);
-}
+double? materialPowerW(MaterialItem material) =>
+    extractPowerW(paramValue(material.params, ['功率', 'power', 'wattage']));
 
 /// 库中料封装（归一化）。
 String materialPackage(MaterialItem material) => normalizePackage(
-  paramOf(material, ['封装', 'package', 'footprint']) ?? material.package,
+  paramValue(material.params, ['封装', 'package', 'footprint']) ??
+      material.package,
 );
 
 /// 容值 → pF：`100nF`=100000、`0.1uF`=100000、`4.7uF`=4700000、`100000pF`=100000。
