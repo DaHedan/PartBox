@@ -3,13 +3,16 @@ import 'package:provider/provider.dart';
 
 import '../data/models.dart';
 import '../data/repositories/location_repository.dart';
+import '../data/repositories/material_repository.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/count_circle.dart';
+import '../widgets/material_card.dart';
 import 'bom_project_list_page.dart';
 import 'inbound_page.dart';
 import 'location_detail_page.dart';
+import 'material_detail_page.dart';
 import 'search_page.dart';
 import 'weld_project_list_page.dart';
 
@@ -23,15 +26,17 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late Future<List<Location>> _future = LocationRepository.all(withStats: true);
+  late Future<List<MaterialItem>> _materialsFuture = MaterialRepository.all();
   int _revision = -1;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    final revision = context.watch<AppState>().revision;
-    if (revision != _revision) {
-      _revision = revision;
+    final appState = context.watch<AppState>();
+    if (appState.revision != _revision) {
+      _revision = appState.revision;
       _future = LocationRepository.all(withStats: true);
+      _materialsFuture = MaterialRepository.all();
     }
 
     return Scaffold(
@@ -42,141 +47,224 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.search),
             tooltip: '搜索',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SearchPage()),
-            ),
+            onPressed: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const SearchPage())),
           ),
         ],
       ),
       drawer: const AppDrawer(current: RootPage.home),
-      body: Column(
-        children: [
-          Expanded(
-            child: FutureBuilder<List<Location>>(
-              future: _future,
-              builder: (context, snapshot) {
-                final locations = snapshot.data ?? const <Location>[];
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                  children: [
-                    _BigCard(
-                      title: 'BOM 对照',
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const BomProjectListPage(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _BigCard(
-                      title: '焊接辅助',
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const WeldProjectListPage(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
+      body: LayoutBuilder(
+        // 顶部（大卡 + 仓库速览）和下面的「所有物料」各自独立滚动：
+        // 顶部最多占 55% 高，内容更高时它内部滚，剩下的都留给物料列表。
+        builder: (context, constraints) => Column(
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: constraints.maxHeight * 0.55,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: FutureBuilder<List<Location>>(
+                  future: _future,
+                  builder: (context, snapshot) {
+                    final locations = snapshot.data ?? const <Location>[];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(
-                          '仓库速览',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: palette.text,
+                        _BigCard(
+                          title: 'BOM 对照',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const BomProjectListPage(),
+                            ),
                           ),
                         ),
-                        const Spacer(),
-                        TextButton(
-                          onPressed: () =>
-                              openRootPage(context, RootPage.location),
-                          child: const Text('全部'),
+                        const SizedBox(height: 12),
+                        _BigCard(
+                          title: '焊接辅助',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const WeldProjectListPage(),
+                            ),
+                          ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Card(
-                      child: locations.isEmpty
-                          ? const Padding(
-                              padding: EdgeInsets.all(24),
-                              child: Center(child: Text('还没有仓库')),
-                            )
-                          : ConstrainedBox(
-                              constraints: const BoxConstraints(maxHeight: 280),
-                              child: ListView.separated(
-                                shrinkWrap: true,
-                                padding: const EdgeInsets.symmetric(vertical: 4),
-                                itemCount: locations.length,
-                                separatorBuilder: (_, _) => Divider(
-                                  color: palette.border,
-                                  height: 1,
-                                  indent: 16,
-                                  endIndent: 16,
-                                ),
-                                itemBuilder: (context, index) {
-                                  final location = locations[index];
-                                  return InkWell(
-                                    onTap: () => Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => LocationDetailPage(
-                                          locationId: location.id!,
-                                        ),
-                                      ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                        vertical: 12,
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.inventory_2_outlined,
-                                            size: 20,
-                                            color: palette.textSub,
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Text(
-                                              location.name,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                fontSize: 15,
-                                                color: palette.text,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          CountCircle(
-                                            count: location.materialKinds,
-                                            size: 28,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
+                        const SizedBox(height: 20),
+                        Row(
+                          children: [
+                            Text(
+                              '仓库速览',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: palette.text,
                               ),
                             ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: FilledButton.icon(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const InboundPage()),
+                            const Spacer(),
+                            TextButton(
+                              onPressed: () =>
+                                  openRootPage(context, RootPage.location),
+                              child: const Text('全部'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Card(
+                          child: locations.isEmpty
+                              ? const Padding(
+                                  padding: EdgeInsets.all(24),
+                                  child: Center(child: Text('还没有仓库')),
+                                )
+                              : ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxHeight: 280,
+                                  ),
+                                  child: ListView.separated(
+                                    shrinkWrap: true,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 4,
+                                    ),
+                                    itemCount: locations.length,
+                                    separatorBuilder: (_, _) => Divider(
+                                      color: palette.border,
+                                      height: 1,
+                                      indent: 16,
+                                      endIndent: 16,
+                                    ),
+                                    itemBuilder: (context, index) {
+                                      final location = locations[index];
+                                      return InkWell(
+                                        onTap: () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => LocationDetailPage(
+                                              locationId: location.id!,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 12,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.inventory_2_outlined,
+                                                size: 20,
+                                                color: palette.textSub,
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Text(
+                                                  location.name,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    fontSize: 15,
+                                                    color: palette.text,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              CountCircle(
+                                                count: location.materialKinds,
+                                                size: 28,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
-              icon: const Icon(Icons.add),
-              label: const Text('入库'),
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            Expanded(
+              child: FutureBuilder<List<MaterialItem>>(
+                future: _materialsFuture,
+                builder: (context, snapshot) {
+                  final materials = snapshot.data ?? const <MaterialItem>[];
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 区块头固定在列表上方，不跟着滚
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                        child: Row(
+                          children: [
+                            Text(
+                              '所有物料',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: palette.text,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '共 ${materials.length} 种',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: palette.textSub,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: ListView(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                          children: [
+                            if (materials.isEmpty)
+                              const Card(
+                                child: Padding(
+                                  padding: EdgeInsets.all(24),
+                                  child: Center(child: Text('还没有物料')),
+                                ),
+                              )
+                            else
+                              for (final item in materials) ...[
+                                MaterialCard(
+                                  item: item,
+                                  lowStock: appState.isLowStock(item),
+                                  iconKey: item.categoryIcon,
+                                  onTap: () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => MaterialDetailPage(
+                                        materialId: item.id!,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                              ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const InboundPage())),
+                icon: const Icon(Icons.add),
+                label: const Text('入库'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
