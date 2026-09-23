@@ -149,8 +149,8 @@ class IbomData {
 class IbomParser {
   const IbomParser._();
 
-  /// 阻焊蓝色（iBOM 内部 cfg 值）。
-  static const String solderMaskBlue = 'solder_mask_blue';
+  /// 阻焊绿色（iBOM 内部 cfg 值）。绿板最常见，也和 iBOM 面板里显示的默认值一致。
+  static const String solderMaskGreen = 'solder_mask_green';
 
   /// 焊盘喷锡（银色）。
   static const String padSilver = 'silver';
@@ -330,7 +330,7 @@ class IbomParser {
   }
 
   /// 打开前改写 HTML：
-  /// 1. 把 3D 板子初始成「阻焊蓝 + 焊盘喷锡（银）」；
+  /// 1. 把 3D 板子初始成「阻焊绿 + 焊盘喷锡（银）」；
   /// 2. 强制视口宽度，让 Android 上也呈现电脑端布局（PRD 11.3）。
   ///
   /// iBOM 的板子材质正是读 `<meta name="solder-mask-material">` 与
@@ -340,7 +340,7 @@ class IbomParser {
   /// 而 querySelector 取**第一个**匹配，插最前面才一定生效。
   static String prepareHtml(
     String html, {
-    String solderMask = solderMaskBlue,
+    String solderMask = solderMaskGreen,
     String pad = padSilver,
     int viewportWidth = 1280,
   }) {

@@ -80,7 +80,7 @@ String buildFakeIbom() {
     'language': 'zh-hans',
   };
   return '<html><head><title>SMT-UI App</title>'
-      '<meta name="solder-mask-material" content="solder_mask_green">'
+      '<meta name="solder-mask-material" content="solder_mask_blue">'
       '<!-- <meta name="pad-material" content="gold" /> -->'
       '</head><body><script>window.files = ${jsonEncode(files)};'
       ' window.__ENGING_OBJ_PRELOAD__ = {"a":{"b":1}};</script></body></html>';
@@ -155,19 +155,20 @@ void main() {
     });
   });
 
-  group('F11 打开前改写（阻焊蓝 / 焊盘喷锡）', () {
+  group('F11 打开前改写（阻焊绿 / 焊盘喷锡）', () {
     test('meta 插在 head 之后，抢在原有设置前面生效', () {
       final out = IbomParser.prepareHtml(buildFakeIbom());
-      final blue = out.indexOf('name="solder-mask-material" content="solder_mask_blue"');
-      expect(blue, greaterThan(0));
+      final green =
+          out.indexOf('name="solder-mask-material" content="solder_mask_green"');
+      expect(green, greaterThan(0));
       expect(
-        RegExp(r'<meta[^>]*content="solder_mask_green"').hasMatch(out),
+        RegExp(r'<meta[^>]*content="solder_mask_blue"').hasMatch(out),
         isFalse,
-        reason: '原绿色 meta 应当被改掉',
+        reason: '原蓝色 meta 应当被改掉',
       );
-      // 第一个 solder-mask-material 必须是蓝色
+      // 第一个 solder-mask-material 必须是绿色
       final first = out.indexOf(RegExp('name="solder-mask-material"'));
-      expect(out.indexOf('solder_mask_blue', first), greaterThan(0));
+      expect(out.indexOf('solder_mask_green', first), greaterThan(0));
       // 生效的 pad-material 存在且为 silver
       expect(out.contains('<meta name="pad-material" content="silver">'), isTrue);
       // 被注释掉的那条不用改（改了也不生效），保持原样
@@ -178,8 +179,8 @@ void main() {
       final once = IbomParser.prepareHtml(buildFakeIbom());
       final twice = IbomParser.prepareHtml(once);
       final first = twice.indexOf('name="solder-mask-material"');
-      expect(twice.indexOf('solder_mask_blue', first), greaterThan(0));
-      expect(twice.contains('solder_mask_green'), isFalse);
+      expect(twice.indexOf('solder_mask_green', first), greaterThan(0));
+      expect(twice.contains('solder_mask_blue'), isFalse);
     });
   });
 
@@ -216,7 +217,7 @@ void main() {
       expect(IbomData.lcscOf(sw1.materialKey), 'C2874433');
     });
 
-    test('改写后 3D 板子初始为阻焊蓝 + 喷锡银', () {
+    test('改写后 3D 板子初始为阻焊绿 + 喷锡银', () {
       final html = File(samplePath).readAsStringSync();
       final out = IbomParser.prepareHtml(html);
       expect(out.length, greaterThan(html.length));
@@ -224,11 +225,11 @@ void main() {
       final first = out.indexOf('name="solder-mask-material"');
       expect(first, greaterThan(0));
       final tag = out.substring(first, first + 80);
-      expect(tag, contains('solder_mask_blue'));
-      // 注意：solder_mask_green 还会出现在 JS 的图层默认色里（registType(...)），
-      // 那与 meta 无关，这里只要求不存在「绿色的 meta」。
+      expect(tag, contains('solder_mask_green'));
+      // 注意：solder_mask_blue 还会出现在 JS 的图层色表里，那与 meta 无关，
+      // 这里只要求不存在「蓝色的 meta」。
       expect(
-        RegExp(r'<meta[^>]*content="solder_mask_green"').hasMatch(out),
+        RegExp(r'<meta[^>]*content="solder_mask_blue"').hasMatch(out),
         isFalse,
       );
       expect(out.contains('<meta name="pad-material" content="silver">'), isTrue);

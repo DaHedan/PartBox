@@ -306,7 +306,7 @@ class _WeldProjectListPageState extends State<WeldProjectListPage>
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Text(
                     '支持嘉立创 EDA 专业版导出的「交互式 BOM（SMT 焊接工具）」单文件 HTML\n'
-                    '打开后自动配置为：位号不聚合、隐藏已焊接、阻焊蓝、喷锡银'
+                    '打开后自动配置为：位号不聚合、隐藏已焊接、阻焊绿、喷锡银'
                     '${_supportsDrop ? '\n也可以把 .html 直接拖进窗口' : ''}',
                     textAlign: TextAlign.center,
                     style: TextStyle(

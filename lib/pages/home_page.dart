@@ -62,7 +62,6 @@ class _HomePageState extends State<HomePage> {
                     _BigCard(
                       title: 'BOM 对照',
                       subtitle: '导入嘉立创 BOM，四色比对库存后双导出',
-                      badge: null,
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (_) => const BomProjectListPage(),
@@ -198,15 +197,11 @@ class _BigCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
-    this.badge = '预留',
   });
 
   final String title;
   final String subtitle;
   final VoidCallback onTap;
-
-  /// 右上角角标；_null_ 表示已正式启用（不显示）。
-  final String? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -238,26 +233,6 @@ class _BigCard extends StatelessWidget {
                     ),
                   ],
                 ),
-              ),
-              Positioned(
-                top: 10,
-                right: 12,
-                child: badge == null
-                    ? const SizedBox.shrink()
-                    : Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: palette.border.withValues(alpha: 0.5),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          badge!,
-                          style: TextStyle(fontSize: 11, color: palette.textSub),
-                        ),
-                      ),
               ),
             ],
           ),

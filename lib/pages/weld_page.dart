@@ -338,10 +338,7 @@ class _WeldPageState extends State<WeldPage> {
       case 'select':
         await _loadSelected(message['designator']?.toString() ?? '');
       case 'weld':
-        await _onWeld(
-          message['designator']?.toString() ?? '',
-          message['loss'] == true,
-        );
+        await _onWeld(_weldDesignators(message), message['loss'] == true);
       case 'error':
         if (!mounted) return;
         showToast(context, message['message']?.toString() ?? 'iBOM 注入失败');
@@ -375,29 +372,58 @@ class _WeldPageState extends State<WeldPage> {
     if (mounted) showToast(context, '已清空已焊接');
   }
 
+  /// JS 报上来的「这一行的位号」：聚合时是整组，不聚合时只有一个。
+  List<String> _weldDesignators(Map<Object?, Object?> message) {
+    final raw = message['designators'];
+    if (raw is List) {
+      final list = [
+        for (final one in raw)
+          if (one?.toString().trim().isNotEmpty ?? false)
+            one.toString().trim(),
+      ];
+      if (list.isNotEmpty) return list;
+    }
+    final single = message['designator']?.toString().trim() ?? '';
+    return single.isEmpty ? const [] : [single];
+  }
+
   /// 「丢失」/「完成」：库存 −1 + 写流水 + 记进度。
-  Future<void> _onWeld(String designator, bool loss) async {
-    if (designator.isEmpty) {
+  ///
+  /// 位号聚合时这一行是多颗同料元件：**完成**要按整组扣（每颗一条流水、各自勾选），
+  /// **丢失**仍然只扣 1 颗 —— 丢的是手里的元件，不是这一组。
+  Future<void> _onWeld(List<String> designators, bool loss) async {
+    if (designators.isEmpty) {
       showToast(context, '先在左侧列表里选中一个元件');
       return;
     }
     if (_busy) return;
     _busy = true;
     try {
-      final item = _itemOf(designator);
-      final material = item == null
-          ? null
-          : await WeldService.resolveMaterial(item);
-      final outcome = await WeldService.record(
-        bomProjectId: widget.projectId,
-        designator: designator,
-        bomItemId: item?.id,
-        materialId: material?.id,
-        loss: loss,
-      );
+      final targets = loss ? designators.take(1).toList() : designators;
+      var matched = 0;
+      double? remaining;
+      for (final designator in targets) {
+        final item = _itemOf(designator);
+        final material = item == null
+            ? null
+            : await WeldService.resolveMaterial(item);
+        final outcome = await WeldService.record(
+          bomProjectId: widget.projectId,
+          designator: designator,
+          bomItemId: item?.id,
+          materialId: material?.id,
+          loss: loss,
+        );
+        if (outcome.matched) {
+          matched++;
+          remaining = outcome.remainingAfter;
+        }
+      }
 
-      // 焊好了 → 勾选已焊接并自动选中下一个未焊接（PRD 11.6）
-      await _pushState(selectAfter: loss ? null : designator);
+      // 焊好了 → 勾选已焊接并自动选中下一个未焊接（PRD 11.6）。
+      // selectAfter 用这一组的第一个位号：iBOM 的 data-partbox-des 就是它，
+      // JS 靠它定位当前行再往后找。
+      await _pushState(selectAfter: loss ? null : designators.first);
       final welded = await WeldRepository.weldedCount(widget.projectId);
 
       if (!mounted) return;
@@ -408,16 +434,18 @@ class _WeldPageState extends State<WeldPage> {
       await _loadSelected(_current);
       if (!mounted) return;
 
-      if (!outcome.matched) {
-        showToast(context, '未匹配库存，仅记焊接进度（$designator）');
+      final label = designators.length > 1
+          ? '${designators.first}…${designators.last}（${targets.length} 颗）'
+          : designators.first;
+      if (matched == 0) {
+        showToast(context, '未匹配库存，仅记焊接进度（$label）');
       } else {
-        final remaining = outcome.remainingAfter;
         final tail = remaining == null ? '' : '，余量 ${formatQty(remaining)}';
         showToast(
           context,
           loss
-              ? '$designator 丢失 · 库存 −1$tail'
-              : '$designator 完成 · 库存 −1$tail',
+              ? '$label 丢失 · 库存 −1$tail'
+              : '$label 完成 · 库存 −${targets.length}$tail',
         );
       }
     } catch (error) {

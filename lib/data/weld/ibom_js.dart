@@ -128,32 +128,29 @@ const String ibomInjectJs = r'''
   var DES_RE = /^[A-Za-z]{1,4}\d{1,4}$/;
 
   // 位号在第 2 个 td（顶层）/ 第 3 个 td（底层）里；跳过第 1 个（勾选框列）。
-  // 两种渲染都要兼容：
+  // 只看**第一个能解析出位号的格子**，两种渲染都要兼容：
   // - 位号不聚合：这一格是**纯文本** `<td>C1</td>`，根本没有 span；
-  // - 位号聚合：同一格里有多个位号，各自是 `<span>`（中间用「、」分隔）。
-  function designatorSpans(tr) {
-    var out = [];
+  // - 位号聚合：同一格里有多个位号，各自是 `<span>`（中间用「、」分隔），
+  //   这一格的颗数就是点「完成」该扣的数量。
+  // 不跨格收集，免得把值/封装里长得像位号的串也算进来、重复扣库存。
+  function designatorsOf(tr) {
     var tds = tr.children;
     for (var i = 1; i < Math.min(tds.length, 4); i++) {
-      var found = false;
+      var out = [];
       var spans = tds[i].querySelectorAll('span');
       for (var j = 0; j < spans.length; j++) {
         var text = textOf(spans[j]);
-        if (DES_RE.test(text)) {
-          out.push(text.toUpperCase());
-          found = true;
-        }
+        if (DES_RE.test(text)) out.push(text.toUpperCase());
       }
-      if (!found) {
-        var whole = textOf(tds[i]);
-        if (DES_RE.test(whole)) out.push(whole.toUpperCase());
-      }
+      if (out.length > 0) return out;
+      var whole = textOf(tds[i]);
+      if (DES_RE.test(whole)) return [whole.toUpperCase()];
     }
-    return out;
+    return [];
   }
 
   function designatorOf(tr) {
-    var list = designatorSpans(tr);
+    var list = designatorsOf(tr);
     return list.length > 0 ? list[0] : '';
   }
 
@@ -162,7 +159,7 @@ const String ibomInjectJs = r'''
   function isAggregated() {
     var rows = listRows();
     for (var i = 0; i < rows.length; i++) {
-      if (designatorSpans(rows[i]).length > 1) return true;
+      if (designatorsOf(rows[i]).length > 1) return true;
     }
     return false;
   }
@@ -398,8 +395,20 @@ const String ibomInjectJs = r'''
   }
 
   function fire(loss) {
-    var des = selectedDesignator();
-    post({ type: 'weld', designator: des, loss: !!loss });
+    // 位号聚合时一行是多颗同料元件，要把整行的位号都报给 Dart：
+    // 「完成」扣整组，「丢失」只扣一颗（由 Dart 侧决定）。
+    var row = selectedRow();
+    var list = row ? designatorsOf(row) : [];
+    if (list.length === 0) {
+      var single = selectedDesignator();
+      if (single) list = [single];
+    }
+    post({
+      type: 'weld',
+      designator: list.length > 0 ? list[0] : '',
+      designators: list,
+      loss: !!loss
+    });
   }
 
   // Windows 端键盘快捷键（焦点在网页里，所以由脚本接管）。
@@ -454,7 +463,7 @@ const String ibomInjectJs = r'''
     if (radio && !radio.checked) click(radio);
     if (radio && radio.checked) ST.radioDone = true;
 
-    // 3) 阻焊蓝 + 焊盘喷锡银：由打开前的 <meta> 改写完成，这里不用管。
+    // 3) 阻焊绿 + 焊盘喷锡银：由打开前的 <meta> 改写完成，这里不用管。
   }
 
   // ---------- 等待 iBOM 渲染完成 ----------
