@@ -66,10 +66,13 @@ class StockService {
   }
 
   /// 消耗：消耗量 +n、余量 −n（可为负，视为欠料）。
+  ///
+  /// [type] 用于区分普通消耗与 F11 的「焊接完成 / 焊接丢失」。
   static Future<void> consume({
     required int materialId,
     required double qty,
     String? note,
+    String type = TxType.outbound,
   }) async {
     if (qty <= 0) throw StateError('消耗数量需大于 0');
     await _db.transaction((txn) async {
@@ -90,7 +93,7 @@ class StockService {
       );
       await txn.insert('transactions', {
         'material_id': materialId,
-        'type': TxType.outbound,
+        'type': type,
         'qty': -qty,
         'remaining_after': newRemaining,
         'note': note,

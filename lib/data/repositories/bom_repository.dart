@@ -35,6 +35,12 @@ class BomRepository {
   static Future<void> deleteProject(int id) async {
     await _db.transaction((txn) async {
       await txn.delete('bom_items', where: 'bom_project_id = ?', whereArgs: [id]);
+      // F11 焊接进度属于工程，跟着一起清掉
+      await txn.delete(
+        'weld_progress',
+        where: 'bom_project_id = ?',
+        whereArgs: [id],
+      );
       await txn.delete('bom_projects', where: 'id = ?', whereArgs: [id]);
     });
   }

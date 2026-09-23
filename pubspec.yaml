@@ -47,6 +47,7 @@ dependencies:
   intl: ^0.20.3
   excel: ^4.0.6
   desktop_drop: ^0.8.0
+  flutter_inappwebview: ^6.1.5
 
 dev_dependencies:
   flutter_test:

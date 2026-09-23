@@ -10,8 +10,8 @@ import '../widgets/count_circle.dart';
 import 'bom_project_list_page.dart';
 import 'inbound_page.dart';
 import 'location_detail_page.dart';
-import 'placeholder_page.dart';
 import 'search_page.dart';
+import 'weld_project_list_page.dart';
 
 /// P1 首页（线框 01）。
 class HomePage extends StatefulWidget {
@@ -75,10 +75,7 @@ class _HomePageState extends State<HomePage> {
                       subtitle: 'iBOM 左清单右板图，边焊边扣',
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => const PlaceholderPage(
-                            title: '焊接辅助',
-                            description: '导入 iBOM 工程，左侧元件清单与右侧板图联动，\n【焊一个 / 丢一个 / 跳过 / 撤销】实时扣减库存。',
-                          ),
+                          builder: (_) => const WeldProjectListPage(),
                         ),
                       ),
                     ),

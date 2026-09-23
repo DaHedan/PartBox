@@ -17,7 +17,8 @@ class AppDatabase {
 
   /// v2：`bom_items` 增补嘉立创原始列 + F10 比对字段（match_status / matched_material_id / checked）。
   /// v3：`bom_items` 增补 params_json（按 C 编号查回的原料参数，用于补齐耐压/功率）。
-  static const int schemaVersion = 3;
+  /// v4：`weld_progress`（F11）从占位表改为按位号的状态表：已焊接 / 消耗计数 / 损耗计数 / 时间戳。
+  static const int schemaVersion = 4;
 
   /// `bom_items` 的历次补列（键为引入该列的 schemaVersion，按序幂等执行）。
   static const Map<int, Map<String, String>> _bomItemColumnUpgrades = {
@@ -31,6 +32,17 @@ class AppDatabase {
       'checked': 'INTEGER NOT NULL DEFAULT 0',
     },
     3: {'params_json': 'TEXT'},
+  };
+
+  /// `weld_progress` 的补列（F11.7 需要按位号记已焊接/消耗计数/时间戳）。
+  static const Map<int, Map<String, String>> _weldProgressColumnUpgrades = {
+    4: {
+      'designator': 'TEXT',
+      'welded': 'INTEGER NOT NULL DEFAULT 0',
+      'consume_count': 'INTEGER NOT NULL DEFAULT 0',
+      'loss_count': 'INTEGER NOT NULL DEFAULT 0',
+      'updated_at': 'INTEGER',
+    },
   };
 
   Database? _db;
@@ -74,15 +86,27 @@ class AppDatabase {
         await _addMissingColumns(db, 'bom_items', entry.value);
       }
     }
+    for (final entry in _weldProgressColumnUpgrades.entries) {
+      if (oldVersion < entry.key) {
+        await _addMissingColumns(db, 'weld_progress', entry.value);
+      }
+    }
+    await db.execute(_weldProgressIndex);
   }
 
+  static const String _weldProgressIndex =
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_weld_progress_designator '
+      'ON weld_progress(bom_project_id, designator)';
+
   /// 补列（幂等）：先看 PRAGMA table_info，缺哪列补哪列，重复升级也不会报错。
+  /// 表不存在时 PRAGMA 返回空，直接跳过（不做无谓的 ALTER 报错）。
   Future<void> _addMissingColumns(
     Database db,
     String table,
     Map<String, String> columns,
   ) async {
     final info = await db.rawQuery('PRAGMA table_info($table)');
+    if (info.isEmpty) return;
     final existing = info.map((row) => row['name'] as String).toSet();
     for (final entry in columns.entries) {
       if (existing.contains(entry.key)) continue;
@@ -207,13 +231,19 @@ class AppDatabase {
       )
     ''');
 
+    // F11 焊接辅助：iBOM 自身不持久化勾选，进度按位号存在这里。
     batch.execute('''
       CREATE TABLE weld_progress(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         bom_project_id INTEGER NOT NULL,
         bom_item_id INTEGER,
+        designator TEXT,
+        welded INTEGER NOT NULL DEFAULT 0,
+        consume_count INTEGER NOT NULL DEFAULT 0,
+        loss_count INTEGER NOT NULL DEFAULT 0,
         action TEXT,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER
       )
     ''');
 
@@ -227,6 +257,7 @@ class AppDatabase {
     batch.execute('CREATE INDEX idx_materials_category ON materials(subcategory_id)');
     batch.execute('CREATE INDEX idx_materials_location ON materials(location_id)');
     batch.execute('CREATE INDEX idx_tx_material ON transactions(material_id)');
+    batch.execute(_weldProgressIndex);
 
     await batch.commit(noResult: true);
 

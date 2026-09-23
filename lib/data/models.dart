@@ -525,12 +525,21 @@ class TxType {
   static const outbound = 'out';
   static const adjust = 'adjust';
 
+  /// F11 焊接辅助的两种消耗（PRD 11.6）。
+  /// 前缀「焊接」用于在物料流水里区别于普通消耗。
+  static const weldConsume = 'weld_consume';
+  static const weldLoss = 'weld_loss';
+
   static String label(String type) {
     switch (type) {
       case inbound:
         return '入库';
       case outbound:
         return '消耗';
+      case weldConsume:
+        return '焊接完成';
+      case weldLoss:
+        return '焊接丢失';
       default:
         return '手动校正';
     }
