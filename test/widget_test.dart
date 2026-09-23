@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:excel/excel.dart' as xls;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:partbox/data/app_database.dart';
+import 'package:partbox/data/backup_service.dart';
 import 'package:partbox/data/bom/bom_enrich.dart';
 import 'package:partbox/data/bom/bom_exporter.dart';
 import 'package:partbox/data/bom/bom_matcher.dart';
@@ -11,6 +13,7 @@ import 'package:partbox/data/lcsc/lcsc_service.dart';
 import 'package:partbox/data/models.dart';
 import 'package:partbox/data/repositories/bom_repository.dart';
 import 'package:partbox/data/repositories/material_repository.dart';
+import 'package:partbox/data/repositories/settings_repository.dart';
 import 'package:partbox/data/repositories/transaction_repository.dart';
 import 'package:partbox/data/stock_service.dart';
 import 'package:partbox/theme/app_theme.dart';
@@ -898,6 +901,68 @@ void main() {
       await BomRepository.deleteProject(projectId);
       expect(await BomRepository.items(projectId), isEmpty);
       expect(await BomRepository.projects(), isEmpty);
+    });
+  });
+
+  group('F8 备份与恢复', () {
+    final dbPath = '${Directory.current.path}/.dart_tool/backup_test.db';
+
+    setUpAll(() async {
+      final file = File(dbPath);
+      if (file.existsSync()) file.deleteSync();
+      await AppDatabase.instance.init(overridePath: dbPath);
+    });
+
+    tearDownAll(() async {
+      await AppDatabase.instance.close();
+    });
+
+    test('导出 JSON 覆盖全部表（settings 没有 id 列也不能炸）', () async {
+      await SettingsRepository.set(
+        SettingsRepository.keyLowStockThreshold,
+        '10',
+      );
+      final decoded =
+          jsonDecode(await BackupService.exportJson()) as Map<String, dynamic>;
+
+      expect(decoded['formatVersion'], isNotNull);
+      for (final table in [
+        'transactions',
+        'bom_items',
+        'weld_progress',
+        'bom_projects',
+        'materials',
+        'categories',
+        'locations',
+        'category_param_templates',
+        'settings',
+      ]) {
+        expect(decoded[table], isA<List>(), reason: '$table 没有被导出');
+      }
+      // 种子数据 + 刚写的设置都要在里面
+      expect((decoded['categories'] as List), isNotEmpty);
+      expect(
+        (decoded['settings'] as List).any(
+          (row) => row['key'] == SettingsRepository.keyLowStockThreshold,
+        ),
+        isTrue,
+      );
+    });
+
+    test('导出 → 导入 往返一致', () async {
+      await SettingsRepository.set('lcsc_api_key', 'K1');
+      final materialCount = (await MaterialRepository.count());
+
+      final content = await BackupService.exportJson();
+      final summary = await BackupService.importJson(content);
+
+      expect(summary.counts['settings'], greaterThan(0));
+      expect(summary.materialCount, materialCount);
+      expect(
+        await SettingsRepository.get('lcsc_api_key'),
+        'K1',
+        reason: '恢复后设置应当还在',
+      );
     });
   });
 }

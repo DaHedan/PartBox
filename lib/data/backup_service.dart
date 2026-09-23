@@ -26,6 +26,10 @@ class BackupService {
     'settings',
   ];
 
+  /// 导出时的排序列。settings 的主键是 `key`、没有 `id` 列，
+  /// 按 `id` 排序会直接抛 `no such column: id` 让整个导出失败。
+  static const Map<String, String> _orderBy = {'settings': 'key'};
+
   static Future<String> exportJson() async {
     final db = AppDatabase.instance.db;
     final data = <String, dynamic>{
@@ -34,7 +38,7 @@ class BackupService {
       'exportedAt': DateTime.now().toIso8601String(),
     };
     for (final table in _tables) {
-      data[table] = await db.query(table, orderBy: 'id');
+      data[table] = await db.query(table, orderBy: _orderBy[table] ?? 'id');
     }
     return const JsonEncoder.withIndent('  ').convert(data);
   }
